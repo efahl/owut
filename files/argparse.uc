@@ -81,10 +81,14 @@ export const ArgActions = {
 		this.usage_short(self, {prefix: ""});
 
 		for (let arg in self) {
+  			if (! arg.help) continue; // Explicitly ignore items without help.
+
 			if ("position" in arg) {
 				printf("\n  %s - %s, must be one of:\n", uc(arg.name), arg.help);
 				for (let n,v in arg.one_of) {
-					printf("    %-8s - %s\n", n, v.help);
+					if (v.help) {
+						printf("    %-8s - %s\n", n, v.help);
+					}
 				}
 				printf("\n");
 			}

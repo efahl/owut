@@ -50,11 +50,11 @@ let commands = {
 	check:    { help: "Collect all resources are report stats." },
 	list:     { help: "Show all the packages installed by user." },
 	blob:     { help: "Display the json blob for the ASU build request." },
-	download: { help: "Build and download an image." },
+	download: { help: "Build, download and verify an image." },
 	verify:   { help: "Verify the downloaded image." },
 	install:  { help: "Install the specified local image." },
-	upgrade:  { help: "Build, download and install an image." },
-	_test:    { help: "Run some test cases." },
+	upgrade:  { help: "Build, download, verify and install an image." },
+	_test:    { help: null },
 };
 
 let arg_defs = proto([
@@ -64,7 +64,7 @@ let arg_defs = proto([
 	{ name: "version",     short: "-V", long: "--version-to",  action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
-	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to script to run on first boot (uci-defaults)." },
+	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot." },
 	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Where to store downloaded firmware image." },
 ], ap.ArgParser);
 
