@@ -11,7 +11,8 @@
 //    'ucode-mod-fs'
 //    'ucode-mod-ubus'
 //    'ucode-mod-uci'
-//    'curl' package for composing both GET and POST requests
+//    'ucode-mod-uclient'
+//    'ucode-mod-uloop'
 //    'busybox sha256sum' for checksum calculation
 //    'sysupgrade' for all that stuff
 
@@ -21,10 +22,12 @@ if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
 // There's no ubus module doc yet, so dig through
 // https://github.com/jow-/ucode/blob/master/lib/ubus.c#L1973
 
+const uloop   = require("uloop");
+const uclient = require("uclient");
+
 import * as fs       from "fs";
 import * as mod_ubus from "ubus";
 import * as ap       from "utils.argparse";
-//print(keys(ap)); exit(1);
 import { isnan  }    from "math";
 import { cursor }    from "uci";
 let uci = cursor();
@@ -34,6 +37,7 @@ const Color = {
 	YELLOW: "255;234;0",
 	RED:    "255;0;0",
 };
+
 function colorize(text, color)
 {
 	return `\033[38;2;${color}m${text}\033[m`;
@@ -175,86 +179,94 @@ function sysupgrade(file, options)
 
 //------------------------------------------------------------------------------
 
-function parse_headers()
-{
-	let headers = null;
-
-	let file = fs.open(tmp.rsp_header, "r");
-	if (file) {
-		let line = split(trim(file.read("line")), ' ');
-
-		headers = {
-			http_version: line[0],
-			status:       int(line[1]),
-		};
-
-		while (line = trim(file.read("line"))) {
-			let kv = match(line, /^([^:]*) *: *(.*)$/);
-			let key = lc(kv[1]);
-			let val = kv[2];
-			if (int(val) == val) val = int(val);
-			headers[key] = val;
-		}
-		file.close();
-		if (! options.keep) {
-			fs.unlink(tmp.rsp_header);
-		}
-	}
-
-	return headers;
-}
-
 function _request(url, dst_file, msg, json_blob)
 {
-	// Fake a uclient service using 'curl'.
+	//  uclient function for simple http requests
 	//   url       = self explanatory
 	//   dst_file  = result of request
 	//   msg       = error message if request fails
 	//   json_blob = optional POST data, GET used if null
 
-	let command = {
-		"command": "curl",
-		"params": [
-			"--silent",                       // Turn off curl's monitor output.
-			"--dump-header", tmp.rsp_header,  // Response headers to file.
-			"--user-agent", "owut/" + VERSION,
-			"--output",     dst_file,
-			"--url",        url,
-		],
-	};
+	let uc;
+	let rsp_status;
+	let rsp_headers;
 
-	if (options.verbosity > 2) {
-		// This is massively verbose and duplicates the header dump, but
-		// appears to be the only way to display the request headers.
-		push(command.params, "--verbose");  // Turn on http tracing.
-	}
-
-	if (json_blob) {
-		push(command.params, "--json", json_blob);
-	}
-
-	let data = ubus.call("file", "exec", command);
-
-	if (! data || data.code != 0) {
-		msg = msg ?? `ERROR: Could not access ${url} (server down?)`;
-		warn(`Something failed: ${mod_ubus.error()}\n${msg}\n`);
-		printf("url = %s\n", url);
-		printf("data = %.4J\n", data);
+	let output = fs.open(dst_file, "w");
+	if (! output) {
+		warn(`${msg}\nCould not write: ${dst_file}\n`);
 		return null;
 	}
 
-	let headers = parse_headers();
+	uloop.init();
+	uc = uclient.new(url, null, {
+		header_done: (cb) => {
+			rsp_status  = uc.status();
+
+			rsp_headers = uc.get_headers();
+			rsp_headers["status"] = rsp_status.status;
+			if (options.keep) {
+				let hdrs = fs.open(tmp.rsp_header, "w");
+				hdrs.write(sprintf("%.J\n", rsp_headers));
+				hdrs.close();
+			}
+		},
+
+		data_read: (cb) => {
+			let data;
+			while (length(data = uc.read()) > 0) {
+				output.write(data);
+			}
+		},
+
+		data_eof: (cb) => {
+			output.close();
+			uloop.end();
+		},
+
+		error: (cb, code) => {
+			warn(`Error: ${code}\n`);
+			uloop.end();
+		},
+	});
+
+	if (! uc.ssl_init({verify: false})) {
+		warn(`${msg}\nFailed to initialize SSL\n`);
+		return null;
+	}
+
+	if (! uc.connect()) {
+		warn(`${msg}\nFailed to connect\n`);
+		return null;
+	}
+
+	let type = "GET";
+	let headers = {
+		"User-Agent": "owut/" + VERSION,
+	};
+	let args = {
+		headers: headers,
+	};
+
+	if (json_blob) {
+		type = "POST";
+		headers["Content-Type"] = "application/json";
+		args["post_data"] = json_blob;
+	}
+
+	if (! uc.request(type, args)) {
+		warn(`${msg}\nFailed to send request\n`);
+		return null;
+	}
+	uloop.run();
 
 	if (options.verbosity > 0) {
 		printf("Downloaded %s to %s\n", url, dst_file);
 	}
-	if (options.verbosity > 1) {
-		if (data.stdout) printf("stdout:\n%s\n", data.stdout);
-		if (data.stderr) printf("stderr:\n%s\n", data.stderr);
-		printf("Response headers = %.4J\n", headers);
+	if (options. verbosity > 1) {
+		printf("Reponse headers = %.4J\n", rsp_headers);
 	}
 
-	return headers;
+	return rsp_status;
 }
 
 function read_tmp_json(file)
