@@ -1,0 +1,1437 @@
+#!/usr/bin/ucode -S
+// owut - OpenWrt Upgrade Tool
+// Copyright (c) 2024 Eric Fahlgren <eric.fahlgren@gmail.com>
+// SPDX-License-Identifier: GPL-2.0-only
+// vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
+//------------------------------------------------------------------------------
+// openwrt/openwrt/package/network/config/firewall4/Makefile
+// openwrt/packages/utils/auc/Makefile
+// When you create a Makefile, this version depends on
+//    'ucode'
+//    'ucode-mod-fs'
+//    'ucode-mod-ubus'
+//    'ucode-mod-uci'
+//    'curl' package for composing both GET and POST requests
+//    'busybox sha256sum' for checksum calculation
+//    'sysupgrade' for all that stuff
+
+let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
+if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
+
+// There's no ubus module doc yet, so dig through
+// https://github.com/jow-/ucode/blob/master/lib/ubus.c#L1973
+
+import * as fs       from "fs";
+import * as mod_ubus from "ubus";
+import * as ap       from "utils.argparse";
+//print(keys(ap)); exit(1);
+import { isnan  }    from "math";
+import { cursor }    from "uci";
+let uci = cursor();
+
+const Color = {
+	GREEN:  "0;255;0",
+	YELLOW: "255;234;0",
+	RED:    "255;0;0",
+};
+function colorize(text, color)
+{
+	return `\033[38;2;${color}m${text}\033[m`;
+}
+
+//------------------------------------------------------------------------------
+
+let commands = {
+	dump:     { help: "Collect all resources and dump internal data structures." },
+	check:    { help: "Collect all resources are report stats." },
+	list:     { help: "Show all the packages installed by user." },
+	blob:     { help: "Display the json blob for the ASU build request." },
+	download: { help: "Build and download an image." },
+	verify:   { help: "Verify the downloaded image." },
+	install:  { help: "Install the specified local image." },
+	upgrade:  { help: "Build, download and install an image." },
+	_test:    { help: "Run some test cases." },
+};
+
+let arg_defs = proto([
+	ap.DEFAULT_HELP,
+	ap.DEFAULT_VERSION,
+	{ name: "command",   position: 0, one_of: commands,     action: "store",                           help: "Sub-command to execute" },
+	{ name: "version",   short: "-V", long: "--version-to", action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "keep",      short: "-k", long: "--keep",       action: "set",             default: false, help: "Save all downloaded working files." },
+	{ name: "verbosity", short: "-v", long: "--verbose",    action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "image",     short: "-i", long: "--image",      action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Where to store downloaded firmware image." },
+], ap.ArgParser);
+
+arg_defs.set_prog_info(sprintf("owut - OpenWrt Upgrade Tool version %s (%s)", VERSION, sourcepath()));
+arg_defs.set_bookends(
+	"\nowut is an upgrade tool for OpenWrt.\n",
+	"\nThank you!  Come again!\n"
+);
+
+let options = arg_defs.parse();
+
+//------------------------------------------------------------------------------
+
+let ubus;
+let url;
+let build;
+let device;
+let release;
+
+
+// Temporary and resource files.
+// We save them all with reasonably recognizable names to aid in debugging.
+let tmp_root = "/tmp/owut-";
+let tmp = {
+	bom_json:           `${tmp_root}bom.json`,
+	overview_json:      `${tmp_root}overview.json`,
+	pkg_arch_json:      `${tmp_root}packages-arch.json`,
+	pkg_platform_json:  `${tmp_root}packages-plat.json`,
+	platform_json:      `${tmp_root}platform.json`,
+
+	failed_html:        `${tmp_root}failures.html`,
+
+	req_json:           `${tmp_root}build-request.json`,   // The POST body we send.
+	build_json:         `${tmp_root}build-response.json`,  // First response.
+	build_status_json:  `${tmp_root}build-status.json`,    // Overwritten subsequent responses.
+	rsp_header:         `${tmp_root}rsp-header.txt`,
+
+	firmware_sums:      "/tmp/firmware.sha256sums",        // Expected sha256sums from downloaded firmware.
+	firmware_man:       "/tmp/firmware-manifest.json",     // Manifest of successful build.
+};
+
+
+let packageDB = {};  // Dictionary mirroring opkg data.
+
+let packages = {  // Dictionary of package lists.
+	installed: [],
+	default:   [],
+};
+
+let package_changes = {  // Changes in packages from running release to target.
+	source:     "name-from",  // Required string - name of package in target version
+	target:     "name-to",    // Optional string - if present, name of replaced package in installed version
+	revision:   123,          // Required int - revision at which package change was introduced, see branch.branch_off_rev
+	mandatory:  false,        // Optional bool - if true, then package required in target version
+};
+
+//------------------------------------------------------------------------------
+
+function _run(command, params)
+{
+	let prog = {
+		command: command,
+		params:  params,
+	};
+	return ubus.call("file", "exec", prog);
+}
+
+//------------------------------------------------------------------------------
+
+let sha256 = {
+	save: function(sum) {
+		// Create the checksum file from the image name and expected sum.
+		let sums = fs.open(tmp.firmware_sums, "w");
+		if (sums) {
+			sums.write(sprintf("%s  %s\n", sum, options.image));
+			sums.close();
+		}
+	},
+
+	saved_sum: function() {
+		// Our saved sums is always just a single line
+		let sums = fs.open(tmp.firmware_sums, "r");
+		if (sums) {
+			let line = split(trim(sums.read("line")), /\s+/);
+			sums.close();
+			if (line[1] == options.image)
+				return line[0];
+			warn(`ERROR invalid image '${line[1]}', but expected '${options.image}' in sum file\n`);
+		}
+		return null;
+	},
+
+	sum: function(file) {
+		// Return the checksum for the specified file.
+		let data = _run("/bin/busybox", [ "sha256sum", file ]);
+		return data?.code == 0 ? substr(data.stdout, 0, 64) : null;
+	},
+
+	verify: function() {
+		// Run validation against the saved checksums.
+		return _run("/bin/busybox", [ "sha256sum", "-c", tmp.firmware_sums ]);
+	},
+
+};
+
+//------------------------------------------------------------------------------
+
+function sysupgrade(file, options)
+{
+	let params = options ? [...options, file] : [file];
+	return _run("sysupgrade", params);
+}
+
+//------------------------------------------------------------------------------
+
+function parse_headers()
+{
+	let headers = null;
+
+	let file = fs.open(tmp.rsp_header, "r");
+	if (file) {
+		let line = split(trim(file.read("line")), ' ');
+
+		headers = {
+			http_version: line[0],
+			status:       int(line[1]),
+		};
+
+		while (line = trim(file.read("line"))) {
+			let kv = match(line, /^([^:]*) *: *(.*)$/);
+			let key = lc(kv[1]);
+			let val = kv[2];
+			if (int(val) == val) val = int(val);
+			headers[key] = val;
+		}
+		file.close();
+		if (! options.keep) {
+			fs.unlink(tmp.rsp_header);
+		}
+	}
+
+	return headers;
+}
+
+function _request(url, dst_file, msg, json_blob)
+{
+	// Fake a uclient service using 'curl'.
+	//   url       = self explanatory
+	//   dst_file  = result of request
+	//   msg       = error message if request fails
+	//   json_blob = optional POST data, GET used if null
+
+	let command = {
+		"command": "curl",
+		"params": [
+			"--silent",                       // Turn off curl's monitor output.
+			"--dump-header", tmp.rsp_header,  // Response headers to file.
+			"--user-agent", "owut/" + VERSION,
+			"--output",     dst_file,
+			"--url",        url,
+		],
+	};
+
+	if (options.verbosity > 2) {
+		// This is massively verbose and duplicates the header dump, but
+		// appears to be the only way to display the request headers.
+		push(command.params, "--verbose");  // Turn on http tracing.
+	}
+
+	if (json_blob) {
+		push(command.params, "--json", json_blob);
+	}
+
+	let data = ubus.call("file", "exec", command);
+
+	if (! data || data.code != 0) {
+		msg = msg ?? `ERROR: Could not access ${url} (server down?)`;
+		warn(`Something failed: ${mod_ubus.error()}\n${msg}\n`);
+		printf("url = %s\n", url);
+		printf("data = %.4J\n", data);
+		return null;
+	}
+
+	let headers = parse_headers();
+
+	if (options.verbosity > 0) {
+		printf("Downloaded %s to %s\n", url, dst_file);
+	}
+	if (options.verbosity > 1) {
+		if (data.stdout) printf("stdout:\n%s\n", data.stdout);
+		if (data.stderr) printf("stderr:\n%s\n", data.stderr);
+		printf("Response headers = %.4J\n", headers);
+	}
+
+	return headers;
+}
+
+function read_tmp_json(file)
+{
+	// Read 'file' into a json object, then optionally delete the file.
+	// Primarily used to parse downloads from /tmp.
+	let fd = fs.open(file, "r");
+	let js = json(fd);
+	fd.close();
+	if (! options.keep) {
+		fs.unlink(file);
+	}
+	return js;
+}
+
+//------------------------------------------------------------------------------
+
+function dl_board()
+{
+	// Get the starting point for the target build.
+
+	let msg = "ERROR Could not download platform json.";
+	let rsp = _request(url.platform, tmp.platform_json, msg);
+	if (rsp?.status == 200) {
+		return read_tmp_json(tmp.platform_json);
+	}
+	return null;
+}
+
+function dl_overview() {
+	// Overview is the collection of information about the branches and their releases.
+	//
+	// Note that auc uses branches.json instead.  Its content is all included
+	// in overview.json at '$.branches', but we like overview as it has a few
+	// more useful items.  It can be found at:
+	//     $url.api_root/branches.json
+
+	let msg = `FATAL ERROR could not download '${url.overview}', aborting.`;
+	let rsp = _request(url.overview, tmp.overview_json, msg);
+	if (rsp?.status == 200) {
+		return read_tmp_json(tmp.overview_json);
+	}
+	warn(`Response status: ${rsp?.status}\n`);
+	warn(msg+"\n");
+	exit(1);
+}
+
+function dl_bom()
+{
+	// Download the platform BOM.
+
+	let msg = `ERROR Could not access BOM for ${build.to.version}, kernel version cannot be determined`;
+	let rsp = _request(url.bom, tmp.bom_json, msg);
+	if (rsp?.status == 200) {
+		return read_tmp_json(tmp.bom_json);
+	}
+	return null;
+}
+
+function dl_package_versions()
+{
+	// Downloads and consolidates the two sources of package versions into
+	// a single object.
+
+	let msg = `ERROR Could not download package list to determine versions`;
+	let rsp = _request(url.pkg_arch, tmp.pkg_arch_json, msg);
+	if (rsp?.status != 200) return null;
+	rsp = _request(url.pkg_plat, tmp.pkg_platform_json, msg);
+	if (rsp?.status != 200) return null;
+
+	return {
+		...read_tmp_json(tmp.pkg_arch_json),
+		...read_tmp_json(tmp.pkg_platform_json).packages,
+	};
+}
+
+function dl_build(config)
+{
+	if (options.keep) {
+		if (options.verbosity > 0) {
+			printf("Saving build blob to %s\n", tmp.req_json);
+		}
+		let save = fs.open(tmp.req_json, "w");
+		if (save) {
+			save.write(config);
+			save.close();
+		}
+	}
+
+	let msg = `ERROR Failed to initiate build`;
+	let rsp = _request(url.build, tmp.build_json, msg, config);
+	if (rsp) {
+		return read_tmp_json(tmp.build_json);
+	}
+	return null;
+}
+
+function dl_build_status()
+{
+	// The response is considered valid even if status != 200, as this is the
+	// ongoing status query.  See switch cases in 'download' function.
+
+	let msg = `ERROR Failed to get build status response`;
+	if (_request(url.build_status, tmp.build_status_json, msg)) {
+		return read_tmp_json(tmp.build_status_json);
+	}
+	return null;
+}
+
+//------------------------------------------------------------------------------
+
+function canonical_name(pkg)
+{
+	// Scan the package database for a matching ABI-versioned name, and if
+	// it exists, return the unversioned name for the package.
+	for (let pkg_name, data in packageDB) {
+		if (pkg == data?.versioned) {
+			return pkg_name;
+		}
+	}
+	return pkg;
+}
+
+function depends_what(pkg)
+{
+	// Given a package, return the list of packages it depends upon, i.e., those
+	// packages that will be installed implicitly by 'opkg' dependency checking.
+
+	return packageDB[pkg]?.depends;
+}
+
+function what_depends(pkg)
+{
+	// Given a package, return the list of packages that depend on it.  If the
+	// result is empty, this is a top-level package that must be explicitly
+	// installed.
+
+	let result = [];
+	for (let pkg_name, data in packageDB) {
+		if (pkg in data.depends) {
+			push(result, pkg_name);
+		}
+	}
+	return length(result) ? result : null;
+}
+
+function what_provides(pkg, return_self)
+{
+	// If a package doesn't appear directly in the installed packages, look
+	// and see if the abstract package name is aliased to an actual package.
+	// vim -> vim-full  or  tc -> tc-tiny
+
+	// ??? can this possibly return more than one value (like 'provides_what'
+	// does)?  I don't think it can, unless the package  database is screwed
+	// up somehow.
+
+	for (let pkg_name, data in packageDB) {
+		if (pkg in data.provides) {
+			return pkg_name;
+		}
+	}
+	return return_self ? pkg : null;
+}
+
+function provides_what(pkg)
+{
+	// Inverse of above.  Given a versioned or variant package, find out what
+	// its base package is named.
+	// vim-full -> vim  or  libjson-script202312041 -> libjson-script
+
+	return packageDB[pkg]?.provides;
+}
+
+function is_default(pkg) {
+	// Return status if package is in the defaults for this device, i.e., it
+	// will be present as part of the standard install.
+
+	return pkg in packages.default;
+}
+
+function is_installed(pkg) {
+	// Return status if package is installed on this device.
+	//
+	// Do not look in what-provides to see if we should translate there.
+	// That causes issues for things like dnsmasq-full which provides dnsmasq,
+	// so a call to is_installed('dnsmasq') says yes, when it should say no.
+	//
+	// Maybe add an 'is_provided' for those who need it, distinct from the
+	// actual package installed that provides it.
+
+	pkg = canonical_name(pkg);
+	return pkg in packageDB;
+}
+
+function in_packages(pkg)
+{
+	// Search for a given package in both the platform and arch package lists.
+
+/*
+we haven't read these yet...
+	[ -n "$(jsonfilter -i $pkg_pkg_platform_json -e "\$.packages['${pkg}']")" ] && return 0
+	[ -n "$(jsonfilter -i $pkg_pkg_arch_json     -e "\$['${pkg}']")"          ] && return 0
+	local alias=$(provides_what "$pkg")
+	[ -n "$alias" ] && [ "$alias" != "$pkg" ] && in_packages "$alias" && return 0
+	return 1
+*/
+}
+
+//------------------------------------------------------------------------------
+
+function collect_packages()
+{
+	// When we move to Alpine apk, see
+	//   https://wiki.alpinelinux.org/wiki/Apk_spec
+	//
+	// Using data from opkg status, build an object containing all installed
+	// package dependencies.
+	//
+	//     packageDB = {
+	//         "pkg1": {
+	//             abi_version: "2023",
+	//             versioned:   "package-name2023",
+	//             version:     "version-string",
+	//             new_version: "version-string",
+	//             depends:     [ "deps", ... ],
+	//             provides:    [ "prvs", ... ],
+	//             conflicts:   [ "cons", ... ]
+	// candidates?
+	// default: false, missing: false, keep?: true, ??? },
+	//
+	//         },
+	//         "pkg2": {
+	//             ...
+	//         },
+	//     };
+	//
+	// such that
+	//     pkg = an installed package
+	//     dep = all dependencies; actual 'pkg' name, see NOTE
+	//     prv = alternate names for this package
+	//     con = packages conflicting with this one
+	//
+	// NOTE: We process the dependency list to contain only canonical 'pkg'
+	// names, by scanning the 'provides' lists and replacing aliases.
+	//
+	// It appears that the 'conflicts' are not in canonical form, but we
+	// can't pre-process them because
+	//   vim-full conflicts vim, provided by vim-full but we want vim
+	// but
+	//   opkg -A info libustream-mbedtls20201210
+	// shows non-canonical conflicts values
+	// This is because some packages, like vim or dnsmasq, have variant
+	// packaging where the base package defines the capability.  For things
+	// like libustream-xxx, there is no base capability, just higher-level
+	// packages built to depend on the specific conflicting variants.
+	// See 'opkg -A info libustream-mbedtls20201210' for an example.
+	//
+	// Then there are weird non-conflicting packages, like tc-tiny, tc-full
+	// and tc-bpf, which all purport to provide 'tc', but don't list conflicts.
+
+	let line;
+	let pkg  = null;
+	let save = false;
+	let data = null;
+	let list = null;
+	let m    = null;
+
+	let opkg_status = fs.open("/usr/lib/opkg/status", "r");
+	while (line = opkg_status.read("line")) {
+		line = trim(line);
+
+		if (m = match(line, /^Package: (.*)$/)) {
+			if (save && pkg && data) {
+				packageDB[pkg] = data;
+			}
+			pkg  = m[1];
+			save = true;
+			data = {};
+		}
+		else if (m = match(line, /^ABIVersion: (.*)$/)) {
+			// Remove ABI version, see
+			//    https://github.com/openwrt/rpcd/blob/master/sys.c#L231
+			let ver = m[1];
+
+			data.abi_version = ver;
+			data.versioned   = pkg;
+			pkg = substr(pkg, 0, -length(ver)); // Only after saving original in 'versioned'.
+		}
+		else if (match(line, /^Status:.*not-installed/)) {
+			save = false;
+		}
+		else if (m = match(line, /^Depends: (.*)/)) {
+			list = replace(m[1], /,|\([^\)]*\)/g, ""); // Remove version specs and commas.
+			data.depends = split(trim(list), / +/);
+		}
+		else if (m = match(line, /^Provides: (.*)/)) {
+			list = replace(m[1], /,|\([^\)]*\)/g, "");
+			data.provides = split(trim(list), / +/);
+		}
+		else if (m = match(line, /^Conflicts: (.*)/)) {
+			list = replace(m[1], /,|\([^\)]*\)/g, "");
+			data.conflicts = split(trim(list), / +/);
+		}
+		else if (m = match(line, /^Version: (.*)/)) {
+			data.version = m[1];
+		}
+	}
+	opkg_status.close();
+
+	if (save && pkg && data) {
+		packageDB[pkg] = data;
+	}
+
+	// Once fully populated, we can fix up depend lists to contain only the
+	// canonical package names.
+	for (let pkg, data in packageDB) {
+		data.depends = map(data.depends, canonical_name);
+		if (data?.conflicts)
+			data.conflicts = map(data.conflicts, canonical_name);
+
+		if (pkg in data.provides) {
+			// Remove self from provides list.
+			let loc = index(data.provides, pkg);
+			splice(data.provides, loc, 1);
+			if (length(data.provides) == 0) {
+				delete data.provides;
+			}
+		}
+	}
+
+	packageDB = sort(packageDB);
+
+	let pkg_versions = dl_package_versions();
+	for (let pkg, ver in pkg_versions) {
+		pkg = canonical_name(pkg);
+		if (pkg in packageDB) {
+			packageDB[pkg].new_version = ver;
+		}
+	}
+}
+
+function changed_defaults()
+{
+	// THESE MUST BE ADDED TO THE BUILD LIST...
+	// If we're using "diff_packages: false" in the build blob (which seems
+	// proper, given missing/changed underneath stuff).
+
+	for (let pkg in packages.default) {
+		if (what_provides(pkg)) {
+			printf("default is goofy %-15s %s\n", pkg, what_provides(pkg));
+		}
+	}
+	return filter(
+		map(packages.default, function(pkg) { return what_provides(pkg); }),
+		length
+	);
+}
+
+function missing_defaults()
+{
+	// Return the list of default packages that are not currently installed.
+	return filter(packages.default, function(pkg) {
+		return ! (what_provides(pkg, true) in packageDB);
+	});
+}
+
+const SrcType = {
+	ALL:          0,
+	USER_ONLY:    1,
+	DEFAULT_ONLY: 2,
+};
+
+function top_level(src_type)
+{
+	// Return only the installed top level packages, i.e., those upon which
+	// no other package depends.  'src_type' specifies how the top-level list
+	// is to be filtered.
+	//
+	// Note that this returns installed packages that replace the default
+	// packages, for example, 'dnsmasq-full' instead 'dnsmasq'.  This is
+	// because 'packages.default' contains non-canonical names.
+
+	let tl;
+	switch (src_type) {
+		case SrcType.ALL:
+			tl = function(pkg) {
+				return what_depends(pkg) == null;
+			};
+			break;
+
+		case SrcType.DEFAULT_ONLY:
+			tl = function(pkg) {
+				if (what_depends(pkg)) return false;
+				return is_default(pkg);
+			};
+			break;
+
+		case SrcType.USER_ONLY:
+			tl = function(pkg) {
+				if (what_depends(pkg)) return false;
+				return ! is_default(pkg);
+			};
+			break;
+	}
+	return filter(keys(packageDB), tl);
+}
+
+//------------------------------------------------------------------------------
+
+function initialize_urls()
+{
+	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? "https://sysupgrade.openwrt.org";
+
+	let api        = sysupgrade + "/api/v1";
+	let build      = api + "/build";
+	let status     = build + "/<hash>";
+	let static     = sysupgrade + "/json/v1";
+	let store      = sysupgrade + "/store";
+	let overview   = static + "/overview.json";
+
+	// This should really should be in config somewhere:
+	let downloads  = "https://downloads.openwrt.org";
+
+	url = {
+		sysupgrade_root: sysupgrade, // sysupgrade server base url
+		api_root:        api,        // api for builds and other dynamic requests
+		build:           build,      // build request
+		build_status:    status,     // build status, same as build appended with hash
+		static_root:     static,     // json static api root url
+		store_root:      store,      // api database directory for build results
+		platform:        null,       // release platform json
+		overview:        overview,   // Top-level overview.json, contains available versions
+		pkg_arch:        null,       // Generic arch package list, containing most of the items
+		pkg_plat:        null,       // Platform packages, built specifically for this platform
+
+		downloads_root:  downloads,  // download server base url
+		download:        null,       // with directory at which the "to" build can be found
+		bom:             null,       // BOM for target build
+		failed:          null,       // Failure list html, composed in dl_failures
+	};
+}
+
+function version_cmp(v1, v2) {
+	// Compare two versions and return cmp value based on their relative
+	// ordering.  We want to make sure RCs are before any release, and
+	// SNAPSHOTs are after.
+
+	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126)...
+	v2 = replace(v2, '-SNAP', '.99')+'~';
+	if (v1 < v2) return -1;
+	if (v1 > v2) return  1;
+	return 0;
+}
+
+function version_older(new_version, base_version)
+{
+	// Use version_cmp to see if new_version < base_version.  Useful to detect
+	// if the user is attempting to downgrade their installation.
+	//
+	//  version_older('23.05.2', 'SNAPSHOT') -> true
+
+	return version_cmp(new_version, base_version) < 0;
+}
+
+function show_versions()
+{
+	// Grab the ASU overview to get all the available versions, scan that
+	// for version-to and report.
+
+	let overview = dl_overview();
+
+	let latest   = overview.latest;
+	let branches = overview.branches;
+
+	printf("Listing 'version-to' values from %s:\n  ", url.overview);
+	let versions = [];
+	for (let branch, data in branches) {
+		push(versions, ...data.versions);
+	}
+
+	// Lexical sort of numbers is so ugly, only works until we get to x.x.10...
+	versions = sort(versions, version_cmp);
+	print(join("\n  ", versions), "\n\n");
+
+	let version = build.to.version;
+	if (version in versions)
+		printf("Your version-to '%s' appears valid, so either:\n  1) This build has been removed from the server, or\n  2) The ASU server is having issues.\n", version);
+	else
+		printf("Your specified version-to '%s' is invalid.  Pick one from above.\n", version);
+}
+
+//------------------------------------------------------------------------------
+
+const BuildInfo = {
+	is_snapshot: function() {
+		return this.version == "SNAPSHOT";
+	},
+
+	is_rel_snapshot: function() {
+		return match(this.version, /.*-SNAPSHOT/) != null;
+	},
+
+	is_downgrade_from: function(from) {
+		if (version_older(this.version, from.version))
+			return true;
+		// Same or newer version, so check revision number.
+		return this.rev_num() < from.rev_num();
+	},
+
+	rev_num: function() {
+		// Extracts the revision number from the revision code:
+		//     "r23630-842932a63d" -> 23630
+		let m = match(this.rev_code, /r(.*)-(.*)/);
+		return m ? int(m[1]) : 0;
+	},
+};
+
+function collect_all()
+{
+	let sysb = ubus.call("system", "board");
+
+	let target   = sysb.release.target;
+	let platform = sysb.board_name;
+	let ver_from = sysb.release.version;
+	let ver_to   = options.version ?? ver_from;  // User can override: SNAPSHOT or 22.03.5.
+	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade
+
+
+	// BUG sutype = "sdcard" for ??????????
+	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
+	if (match(target, /x86\//)) {  // This might be wrong, what about x86/geode - geos?
+		platform = "generic";
+		sutype   = "combined";
+	}
+	else {
+		platform = replace(platform, /,/, "_");
+		sutype   = "sysupgrade";
+	}
+
+	if (fs.access("/sys/firmware/efi")) {
+		// All x86, maybe new armsr, too.
+		sutype = `${sutype}-efi`;
+	}
+
+	ver_to = uc(ver_to);
+	if (index(ver_to, "RC") > 0)
+		ver_to = lc(ver_to);
+
+	build = {
+		from: proto({
+			version:    ver_from,               // Full version name currently installed: "SNAPSHOT" or "22.03.1"
+			rev_code:   sysb.release.revision,  // Kernel version that is currently running
+			kver:       sysb.kernel,            // Current build on device
+		}, BuildInfo),
+
+		to: proto({
+			version:    ver_to,                 // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
+			rev_code:   null,                   // Build number from target
+			kver:       null,                   // Kernel version of target build, extracted from BOM
+			img_prefix: null,                   // Prefix of image being built
+			img_file:   null,                   // Full image name to download and install
+			date:       null,                   // Build date of target
+		}, BuildInfo),
+	};
+
+	device = {
+		arch:     null,                   // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in tmp.platform_json
+		target:   sysb.release.target,    // "x86/64" or "ath79/generic" or "mediatek/mt7622", from board file
+		platform: platform,               // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
+		fstype:   sysb.rootfs_type,       // "ext4" or "squashfs"
+		sutype:   sutype,                 // Sysupgrade type, combined, combined-efi or sysupgrade or ???
+	};
+
+	let rel_dir;
+	let rel_branch;
+	if (build.to.is_snapshot()) {
+		rel_dir    = "snapshots";
+		rel_branch = "SNAPSHOT";
+	}
+	else {
+		rel_dir    = `releases/${build.to.version}`;
+		rel_branch = replace(build.to.version, /\.[^.]*$/, "");
+	}
+
+	release = {
+		branch: rel_branch,  // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
+		dir:    rel_dir,     // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
+	};
+
+	// We now know enough to finish up the first URL, which will give us the
+	// keys to the rest of them.
+	url.platform = `${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json`;
+	let board_json = dl_board();
+	if (! board_json) {
+		show_versions();
+		exit(1);
+	}
+
+	device.arch         = board_json.arch_packages;
+	build.to.date       = board_json.build_at;
+	build.to.rev_code   = board_json.version_code;
+	build.to.img_prefix = board_json.image_prefix;
+
+	let location = build.to.is_snapshot()
+		     ? "snapshots/faillogs"
+		     : `releases/faillogs-${release.branch}`;
+	url.failed   = `${url.downloads_root}/${location}/${device.arch}/packages/`;
+
+	url.pkg_arch = `${url.static_root}/${release.dir}/packages/${device.arch}-index.json`;
+	url.pkg_plat = `${url.static_root}/${release.dir}/targets/${device.target}/index.json`;
+
+	let prefix   = "openwrt-";
+	let starget  = replace(device.target, /\//, "-");
+	if (! build.to.is_snapshot())    prefix = `${prefix}${build.to.version}-`;
+	if (build.to.is_rel_snapshot())  prefix = lc(`${prefix}${build.to.rev_code}-`);
+
+	url.download = `${url.downloads_root}/${release.dir}/targets/${device.target}`;
+	url.bom      = `${url.download}/${prefix}${starget}.bom.cdx.json`;
+
+	let ver = "unknown";
+	let bom = dl_bom();
+	for (let comp in bom && bom.components) {
+		if (comp.name == "kernel") {
+			ver = comp.version;
+			break;
+		}
+	}
+	build.to.kver = ver;
+
+	for (let img in board_json.images) {
+		if (img.type == device.sutype && img.filesystem == device.fstype) {
+			build.to.img_file = img.name;
+			break;
+		}
+	}
+
+	collect_packages();
+
+	// These lists need a lot more structure, "sver:...", "tver:...",
+	// "default:true", "missing:false" and that sort of thing.
+	packages.default = ["kernel"];
+	for (let pkg in board_json.default_packages) {
+		push(packages.default, pkg);
+	}
+	for (let pkg in board_json.device_packages) {
+		push(packages.default, pkg);
+	}
+	packages.default = sort(packages.default);
+
+	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
+//  printf("ubus.error = %s\n", mod_ubus.error());
+//  printf("%s\n", type(installed));
+
+	packages.installed = sort(installed.packages);
+//  printf("%.4J\n", packages);
+//  for (let pkg in sort(packages)) {
+//      let ver = packages[pkg];
+//      printf("%s = %s\n", pkg, ver);
+//  }
+
+}
+
+//------------------------------------------------------------------------------
+
+function dump()
+{
+	// Send forth a json representation of all the stuff we've collected.
+	printf('{\n');
+	printf('"options": %.4J,\n', options);
+	printf('"url": %.4J,\n', sort(url));
+	printf('"tmp": %.4J,\n', sort(tmp));
+	printf('"build": %.4J,\n', build);
+	printf('"device": %.4J,\n', device);
+	printf('"release": %.4J,\n', release);
+	if (options.verbosity > 0) {
+		printf('"packages": %.4J,\n', packages);
+		printf('"packageDB": %.4J,\n', packageDB);
+	}
+	printf('}\n');
+}
+
+function show_config()
+{
+	// Pretty print the major configuration values.
+	let downgrade = build.to.is_downgrade_from(build.from) ? colorize(" DOWNGRADE", Color.RED) : "";
+	print(
+		`Board-name     ${device.platform}\n`
+		`Target         ${device.target}\n`
+		`Root-FS-type   ${device.fstype}\n`
+		`Sys-type       ${device.sutype}\n`
+		`Package-arch   ${device.arch}\n`
+		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kver})\n`
+		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kver})${downgrade}\n`
+		`Build-at       ${build.to.date}\n`
+		`Image-prefix   ${build.to.img_prefix}\n`
+		`Image-file     ${build.to.img_file}\n`
+		`Image-URL      ${url.download}/${build.to.img_file}\n`
+	);
+	printf("Installed      %3d packages\n", length(packageDB));
+	printf("Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
+	printf("Default        %3d packages\n", length(packages.default));
+	printf("User-installed %3d packages (top-level only)\n", length(top_level(SrcType.USER_ONLY)));
+	print("\n");
+}
+
+const ver_bits = regexp('[^a-z0-9]', 'i');
+function ver_cmp(old, new)
+{
+	let v1 = split(lc(old), ver_bits);
+	let v2 = split(lc(new), ver_bits);
+	for (let i, n1 in v1) {
+		let n2 = v2[i];
+		if (n1 != n2) {
+			if (! isnan(int(n1))) n1 = int(n1);
+			if (! isnan(int(n2))) n2 = int(n2);
+			if (n1 < n2) return -1;
+			if (n1 > n2) return  1;
+		}
+	}
+	return 0;
+}
+
+function ver_older(v1, v2)
+{
+	// Is v1 and older version than v2?
+	return ver_cmp(v1, v2) < 0;
+}
+
+function show_updates()
+{
+	printf("Package version changes:\n");
+	let w0 = max(...map(keys(packageDB), length));
+	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
+	let f0 =`  %-${w0}s  %-${w1}s %s\n`;
+	let changes = 0, new = '';
+	for (let pkg, data in packageDB) {
+		if (pkg in [ "kernel", "libc" ]) continue;
+
+		let old = data.version;
+		let new = data.new_version;
+		if (old == new) continue;
+
+		changes++;
+		if (new == null) {
+			new = colorize("missing to-version", Color.RED);
+		}
+		else {
+			new = colorize(
+				new,
+				ver_older(old, new) ? Color.GREEN : Color.YELLOW
+			);
+		}
+		printf(f0, pkg, data.version, new);
+	}
+	if (changes) {
+		printf("%d packages are out-of-date.\n", changes);
+	}
+	else {
+		printf("  All packages are up-to-date.\n");
+	}
+	print("\n");
+}
+
+function checks()
+{
+}
+
+function tests()
+{
+	let all = top_level(SrcType.ALL);
+	let def = top_level(SrcType.DEFAULT_ONLY);
+	let usr = top_level(SrcType.USER_ONLY);
+
+	print('changed defaults\n  ', join(" ", changed_defaults()), '\n');
+	print('missing defaults\n  ', join(" ", missing_defaults()), '\n');
+	printf('defaults               %d\n  %s\n', length(packages.default), join(" ", packages.default));
+	printf('all          top-level %d\n  %s\n', length(all), join(" ", all));
+	printf('default-only top-level %d\n  %s\n', length(def), join(" ", def));
+	printf('non-default  top-level %d\n  %s\n', length(usr), join(" ", usr));
+
+print('xxxxxxxxxxxxxxxx def vs def\n');
+let i = 0;
+for (let pkg in packageDB) {
+	let in_def = pkg in packages.default;
+	let in_top = pkg in def;
+	if (in_def || in_top) {
+		i++;
+		printf('  %3d %-20s  %-3s  %s\n', i, pkg, in_def ? "def" : "-", in_top ? "top" : "-");
+	}
+}
+
+
+	print('\n\n');
+	print('Now the odd ones, non-top-level defaults:\n');
+	let w = max(...map(packages.default, length));
+	let f =`  %-${w}s  %s\n`;
+	for (let pkg in packages.default) {
+		if (pkg in ["kernel", "libc"]) continue;  // Obvious ones...
+		let deps = what_depends(pkg);
+		if (deps != null) {
+			printf(f, pkg, deps);
+		}
+	}
+
+	if (false) {
+		// Allow checking for conflicts if user changes an installed package.
+		for (let pkg, data in packageDB) {
+			if (data?.conflicts) {
+				printf("Installed %-15s conflicts with %s\n", pkg, data.conflicts);
+			}
+		}
+	}
+
+	if (false) {
+		for (let pkg in packages.default) {
+			if (! (pkg in packages.depends)) {
+				printf("  in def not dep  %s\n", pkg);
+			}
+		}
+		print("\n");
+		for (let pkg in packages.depends) {
+			if (! (pkg in packages.default)) {
+				printf("  in dep not def  %s\n", pkg);
+			}
+		}
+	}
+
+	if (true) {
+		// Test a handful of packages;
+		for (let pkg in [
+			"libncurses6", "libncursesw", "libncurses", "libncursesw6",
+			"dropbear", "vim", "vim-full", "dnsmasq", "dnsmasq-full", "bort"
+		]) {
+			printf("%s\n", pkg);
+			print('  depends_what  ', depends_what(pkg), '\n');
+			print('  what_depends  ', what_depends(pkg), '\n');
+			print('  provides_what ', provides_what(pkg), '\n');
+			print('  what_provides ', what_provides(pkg), '\n');
+			print('  is_default    ', is_default(pkg), '\n');
+			print('  is_installed  ', is_installed(pkg), '\n');
+		}
+	}
+
+	if (true) {
+		// Do some forensics on why rpc-sys returns different than what's in opkg DB.
+		printf("Scan rpc-sys list for items missing in DB:\n");
+		for (let pkg in packages.installed) {
+			if (! (pkg in packageDB)) {
+				let alias = what_provides(pkg);
+				if (! (alias in packageDB)) {
+					printf(" pkg in installed, not in DB %s %s\n", pkg, what_provides(pkg));
+				}
+			}
+		}
+		print('\n');
+		printf("Scan opkg DB for items missing in rpc-sys:\n");
+		for (let pkg in packageDB) {
+			if (! (pkg in packages.installed)) {
+				let found = false;
+				for (let alias in provides_what(pkg)) {
+					if (alias in packages.installed) {
+						found = true;
+						break;
+					}
+				}
+				if (! found) {
+					let provides = provides_what(pkg) ?? `only "${pkg}"`;
+					printf(" pkg in DB, not in installed %s, provides %s\n", pkg, provides);
+				}
+			}
+		}
+	}
+
+	if (false) {
+		print('\n');
+		for (let pkg in packages.default) {
+			if (what_provides(pkg)) {
+				printf("def renamed %s -> %s\n", pkg, what_provides(pkg));
+			}
+		}
+	}
+}
+
+function blob()
+{
+	// Exclude default packages unless explicitly listed in 'packages'.  When
+	// moving between releases, default packages may be added, deleted or
+	// renamed, which can result in bricks if something important is missed.
+	//
+	// On the other hand, what if we replace a default package, say,
+	// 'dnsmasq' with 'dnsmasq-full'?  Then we must use the full top-level
+	// list, plus target version defaults, and set this value 'true'.
+	//
+	// False is the safer option, so that's our default value.
+	let contains_defaults = true;
+
+	let build_list = top_level(SrcType.ALL); // should be '! contains_defaults' - but not really...
+	for (let pkg in packages.default) {
+		let p = what_provides(pkg);
+		if (! (p in build_list)) {
+		}
+	}
+
+//build_list = [ "auc", "file" ]; // TTTTTTTTTTTTTTTTTTTTESSSTINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
+
+	let defaults_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+	let defaults_name   = "/rom/etc/uci-defaults/99-asu-defaults"; // MOOOOOOOOOOOOOOOOVe this to an option, allow user to specify from outside ROM partition.
+	let defaults_file   = fs.open(defaults_name);
+	let defaults;
+	if (defaults_file) {
+		defaults = defaults_file.read("all");
+		defaults_file.close();
+		if (length(defaults) > defaults_maxlen) {
+			warn(`WARNING: '${defaults_name}' is over the ${defaults_maxlen} byte maximum and will be ignored.\n`);
+			defaults = null;
+		}
+	}
+
+	let blob = {
+		client:        "owut/" + VERSION,
+		target:        device.target,
+		profile:       device.platform,  // sanitized board name
+
+		version:       build.to.version,
+		version_code:  build.to.rev_code,
+		filesystem:    device.fstype,
+
+		diff_packages: contains_defaults,
+		packages:      build_list,
+	};
+
+	if (defaults) {
+		blob.defaults = defaults;
+	}
+
+	return blob;
+}
+
+function json_blob()
+{
+	return sprintf("%J", blob());
+}
+
+function show_blob()
+{
+	printf("%.4J\n", blob());
+}
+
+function select_image(images)
+{
+	for (let image in images) {
+		if (image.filesystem == device.fstype && image.type == device.sutype) {
+			return image;
+		}
+	}
+	return null;
+}
+
+function verify_image()
+{
+	// Verify the image with both the saved sha256sum and by passing it
+	// to 'sysupgrade --test'.
+	//
+	// Failed images will be delete, unless '--keep' is set.
+
+	let image = options.image;
+
+	if (! fs.access(image)) {
+		warn(`ERROR image file '${image}' does not exist\n`);
+		return false;
+	}
+
+	printf("Verifying: %s\n", image);
+
+	let result = sha256.verify();
+	if (result?.code == 0) {
+		printf("  Saved sha256 matches\n", image);
+	}
+	else {
+		let file_sha = sha256.sum(image);
+		let expected = sha256.saved_sum();
+		warn(`  ERROR sha256 doesn't match:\n`
+		     `    calculated '${file_sha}'\n`
+		     `    saved      '${expected}'\n`);
+		if (! options.keep) {
+			fs.unlink(image);
+		}
+		return false;
+	}
+
+	result = sysupgrade(image, ["--test"]);
+	if (result?.code == 0) {
+		printf("  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
+	}
+	else {
+		warn("ERROR sysupgrade validation failed:\n");
+		if (result.stdout) printf("stdout =\n%s\n", result.stdout);
+		if (result.stderr) printf("stderr =\n%s\n", result.stderr);
+		if (! options.keep) {
+			fs.unlink(image);
+		}
+		return false;
+	}
+
+	printf("Checks complete, image is valid.\n");
+	return true;
+}
+
+function download()
+{
+	// Use the json_blob to create a build request, run the request and
+	// download the result.
+	//
+	// On success, return true, otherwise spew all sorts of stuff and
+	// return false.
+	//
+	// To download the built image:
+	// https://github.com/openwrt/luci/blob/master/applications/luci-app-attendedsysupgrade/htdocs/luci-static/resources/view/attendedsysupgrade/overview.js#L108
+
+	let start = time();
+
+	printf("\nRequesting build ----------------------\n");
+	let response = dl_build(json_blob());
+
+	let hash = response?.request_hash;
+	if (hash) {
+		printf("Hash:   %s\n", hash);
+		url.build_status = `${url.build}/${hash}`;
+	}
+
+	let queries = 0;
+	while (response) {
+		let status = response.status;
+
+		printf("Status: %d\n", status);
+		printf("Detail: %s", response.detail);
+		switch (response.detail) {
+			case "queued":
+				printf(" - %d ahead of you", response.queue_position);
+				break;
+			case "started":
+				printf(" - %s", response.imagebuilder_status ?? "setup");
+				break;
+			default:
+				break;
+		}
+		printf("\n");
+
+		switch (status) {
+			case 202: // Build in-progress, check in after 10 seconds.
+				sleep(10000);
+				queries++;
+				printf("\nProgress %3d (%4ds) -----------------------------\n", queries, time()-start);
+				response = dl_build_status();
+				break;
+
+			case 200: // All done.
+				printf("Build completed in %d seconds.\n", time()-start);
+				if (options.verbosity > 0) {
+					printf("build_at       = %s\n",   response.build_at);
+					printf("version_number = %s\n",   response.version_number);
+					printf("version_code   = %s\n",   response.version_code);
+				}
+				if (options.verbosity > 1) {
+					printf("images = %.4J\n", response.images);
+				}
+				if (options.verbosity > 2) {
+					printf("build_cmd = %.4J\n", response.build_cmd);
+					printf("manifest = %.4J\n", response.manifest);
+				}
+				print("\n");
+
+				let image = select_image(response.images);
+				if (! image) {
+					warn(`Could not locate an image for ${device.fstype} and ${device.sutype}...`);
+					return false;
+				}
+
+				let sha = image.sha256;  // LuCI-ASU uses sha256_unsigned for something...
+				let dir = response.bin_dir;
+				let bin = `${url.store_root}/${dir}`;
+				let img = `${bin}/${image.name}`;
+				let dst = options.image;
+
+				printf("Image: %s\n", img);
+
+				let msg = `ERROR Couldn't download image ${image.name}`;
+				let rsp = _request(img, dst, msg);
+				if (rsp?.status != 200) {
+					// need more output here, if 404 or whatever
+					return false;
+				}
+
+				let manifest = fs.open(tmp.firmware_man, "w");
+				if (manifest) {
+					manifest.write(sprintf("%.4J\n", response.manifest));
+					manifest.close();
+					printf("Manifest: %s\n", tmp.firmware_man);
+				}
+
+				sha256.save(sha);
+
+				return verify_image();
+
+			// Everything else is "failure - we're done" cases.
+			case 400: // Invalid build request.
+			case 422: // Unknown package.
+			case 500: // Invalid build request.
+			default:  // ???
+				if (response.error ) printf("error  =\n%s\n", response.error);
+				if (response.stdout) printf("stdout =\n%s\n", response.stdout);
+				if (response.stderr) printf("stderr =\n%s\n", response.stderr);
+				printf("ERROR build failed with status %s.\n", status);
+				return false;
+		}
+	}
+	return false;
+}
+
+//------------------------------------------------------------------------------
+
+if (options.verbosity) {
+	arg_defs.show_version();
+}
+
+ubus = mod_ubus.connect();
+if (! ubus) {
+	die(`Unable to connect to ubus: ${mod_ubus.error()}\n`);
+}
+
+initialize_urls();
+
+switch (options.command) {
+	case "dump":
+		collect_all();
+		dump();
+		break;
+
+	case "list":
+		collect_all();
+		print(join(" ", top_level(SrcType.USER_ONLY)), "\n");
+		break;
+
+	case "check":
+		collect_all();
+		show_config();
+		show_updates();
+		checks();
+		break;
+
+	case "blob":
+		collect_all();
+		show_blob();
+		break;
+
+	case "download":
+		collect_all();
+		show_config();
+		show_updates();
+		download();
+		break;
+
+	case "verify":
+		verify_image();
+		break;
+
+	case "_test":
+		collect_all();
+		show_config();
+		show_updates();
+		checks();
+		tests();
+		break;
+
+	default:
+		warn(`'${options.command}' not implemented yet.\n`);
+		break;
+}
+
+ubus.disconnect();
