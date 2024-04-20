@@ -4,8 +4,11 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
-// openwrt/openwrt/package/network/config/firewall4/Makefile
-// openwrt/packages/utils/auc/Makefile
+// TODO
+// Makefile 
+// See
+//    openwrt/openwrt/package/network/config/firewall4/Makefile
+//    openwrt/packages/utils/auc/Makefile
 // When you create a Makefile, this version depends on
 //    'ucode'
 //    'ucode-mod-fs'
@@ -15,6 +18,10 @@
 //    'ucode-mod-uloop'
 //    'busybox sha256sum' for checksum calculation
 //    'sysupgrade' for all that stuff
+
+// conf in argparse from /etc/config/<prog>
+// parse fail.html
+// dig through auc ssl_ctx setup and fix uc.ssl_init
 
 let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
 if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
@@ -94,6 +101,8 @@ let tmp = {
 	pkg_arch_json:      `${tmp_root}packages-arch.json`,
 	pkg_platform_json:  `${tmp_root}packages-plat.json`,
 	platform_json:      `${tmp_root}platform.json`,
+
+	fs_conf_js:         `${tmp_root}config.js`,
 
 	failed_html:        `${tmp_root}failures.html`,
 
@@ -297,7 +306,8 @@ function dl_board()
 	return null;
 }
 
-function dl_overview() {
+function dl_overview()
+{
 	// Overview is the collection of information about the branches and their releases.
 	//
 	// Note that auc uses branches.json instead.  Its content is all included
@@ -313,6 +323,32 @@ function dl_overview() {
 	warn(`Response status: ${rsp?.status}\n`);
 	warn(msg+"\n");
 	exit(1);
+}
+
+function dl_fs_conf()
+{
+	// Download the overview metadata from the firmware-selector, as it
+	// has a much more liberal notion as to what builds are available.
+	//
+	// This is hacky and fragile, parsing JS into ucode, then running it.
+
+	let msg = `FATAL ERROR could not download '${url.fs_conf}', aborting.`;
+	let rsp = _request(url.fs_conf, tmp.fs_conf_js, msg);
+	if (rsp?.status != 200) {
+		warn(`Response status: ${rsp?.status}\n`);
+		warn(msg+"\n");
+		exit(1);
+	}
+
+	let input = fs.open(tmp.fs_conf_js, "r");
+	let code = input.read("all");
+	code = replace(code, "var config =", "return");
+	input.close();
+	let data = loadstring(code);
+	if (! options.keep) {
+		fs.unlink(tmp.fs_conf_js);
+	}
+	return data();
 }
 
 function dl_bom()
@@ -441,14 +477,16 @@ function provides_what(pkg)
 	return packageDB[pkg]?.provides;
 }
 
-function is_default(pkg) {
+function is_default(pkg)
+{
 	// Return status if package is in the defaults for this device, i.e., it
 	// will be present as part of the standard install.
 
 	return pkg in packages.default;
 }
 
-function is_installed(pkg) {
+function is_installed(pkg)
+{
 	// Return status if package is installed on this device.
 	//
 	// Do not look in what-provides to see if we should translate there.
@@ -680,6 +718,7 @@ function top_level(src_type)
 function initialize_urls()
 {
 	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? "https://sysupgrade.openwrt.org";
+	let fs_root    = "https://firmware-selector.openwrt.org";
 
 	let api        = sysupgrade + "/api/v1";
 	let build      = api + "/build";
@@ -687,6 +726,7 @@ function initialize_urls()
 	let static     = sysupgrade + "/json/v1";
 	let store      = sysupgrade + "/store";
 	let overview   = static + "/overview.json";
+	let fs_conf     = fs_root + "/config.js";
 
 	// This should really should be in config somewhere:
 	let downloads  = "https://downloads.openwrt.org";
@@ -703,6 +743,9 @@ function initialize_urls()
 		pkg_arch:        null,       // Generic arch package list, containing most of the items
 		pkg_plat:        null,       // Platform packages, built specifically for this platform
 
+		fs_root:         fs_root,    // Firmware-selector root.
+		fs_conf:         fs_conf,    // FS config.js
+
 		downloads_root:  downloads,  // download server base url
 		download:        null,       // with directory at which the "to" build can be found
 		bom:             null,       // BOM for target build
@@ -710,12 +753,15 @@ function initialize_urls()
 	};
 }
 
-function version_cmp(v1, v2) {
+function version_cmp(v1, v2)
+{
 	// Compare two versions and return cmp value based on their relative
 	// ordering.  We want to make sure RCs are before any release, and
 	// SNAPSHOTs are after.
 
-	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126)...
+	// BUG - lexical, so x.10 < x.2, blarg...
+
+	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126), so late in sort order.
 	v2 = replace(v2, '-SNAP', '.99')+'~';
 	if (v1 < v2) return -1;
 	if (v1 > v2) return  1;
@@ -737,15 +783,27 @@ function show_versions()
 	// Grab the ASU overview to get all the available versions, scan that
 	// for version-to and report.
 
-	let overview = dl_overview();
+	let versions;
+	if (true) {
+		// Actually, let's ignore ASU server and get the metadata from
+		// the firmware selector, as it keeps a much bigger and more
+		// current list.
+		let conf   = dl_fs_conf();
+		let latest = conf.default_version;
+		versions   = keys(conf.versions);
+		printf("Listing 'version-to' values from %s:\n  ", url.fs_conf);
+	}
+	else {
+		let overview = dl_overview();
 
-	let latest   = overview.latest;
-	let branches = overview.branches;
+		let latest   = overview.latest;
+		let branches = overview.branches;
 
-	printf("Listing 'version-to' values from %s:\n  ", url.overview);
-	let versions = [];
-	for (let branch, data in branches) {
-		push(versions, ...data.versions);
+		versions = [];
+		for (let branch, data in branches) {
+			push(versions, ...data.versions);
+		}
+		printf("Listing 'version-to' values from %s:\n  ", url.overview);
 	}
 
 	// Lexical sort of numbers is so ugly, only works until we get to x.x.10...
@@ -792,9 +850,17 @@ function collect_all()
 	let target   = sysb.release.target;
 	let platform = sysb.board_name;
 	let ver_from = sysb.release.version;
-	let ver_to   = options.version ?? ver_from;  // User can override: SNAPSHOT or 22.03.5.
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade
 
+	let ver_to;
+	if (options.version)
+		ver_to = options.version;
+	else if (ver_from == "SNAPSHOT")
+		ver_to = ver_from;
+	else {
+		let conf = dl_fs_conf();
+		ver_to = conf.default_version;
+	}
 
 	// BUG sutype = "sdcard" for ??????????
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
