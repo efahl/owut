@@ -60,11 +60,12 @@ let commands = {
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
 	ap.DEFAULT_VERSION,
-	{ name: "command",   position: 0, one_of: commands,     action: "store",                           help: "Sub-command to execute" },
-	{ name: "version",   short: "-V", long: "--version-to", action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
-	{ name: "keep",      short: "-k", long: "--keep",       action: "set",             default: false, help: "Save all downloaded working files." },
-	{ name: "verbosity", short: "-v", long: "--verbose",    action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
-	{ name: "image",     short: "-i", long: "--image",      action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Where to store downloaded firmware image." },
+	{ name: "command",     position: 0, one_of: commands,      action: "store",                           help: "Sub-command to execute" },
+	{ name: "version",     short: "-V", long: "--version-to",  action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
+	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to script to run on first boot (uci-defaults)." },
+	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Where to store downloaded firmware image." },
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(sprintf("owut - OpenWrt Upgrade Tool version %s (%s)", VERSION, sourcepath()));
@@ -1172,16 +1173,25 @@ function blob()
 
 //build_list = [ "auc", "file" ]; // TTTTTTTTTTTTTTTTTTTTESSSTINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
 
-	let defaults_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
-	let defaults_name   = "/rom/etc/uci-defaults/99-asu-defaults"; // MOOOOOOOOOOOOOOOOVe this to an option, allow user to specify from outside ROM partition.
-	let defaults_file   = fs.open(defaults_name);
-	let defaults;
-	if (defaults_file) {
-		defaults = defaults_file.read("all");
-		defaults_file.close();
-		if (length(defaults) > defaults_maxlen) {
-			warn(`WARNING: '${defaults_name}' is over the ${defaults_maxlen} byte maximum and will be ignored.\n`);
-			defaults = null;
+	let init_script;
+	if (options.init_script) {
+		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+		let inits_file   = fs.open(options.init_script);
+		if (! inits_file) {
+			warn(`ERROR init script file '${options.init_script}' does not exist\n`);
+			return null;
+		}
+		else {
+			init_script = inits_file.read("all");
+			inits_file.close();
+			if (length(init_script) > inits_maxlen) {
+				warn(`ERROR '${options.init_script}' is over the ${inits_maxlen} byte maximum\n`);
+				return null;
+			}
+		}
+
+		if (options.verbose > 0) {
+			printf("Included '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 		}
 	}
 
@@ -1198,8 +1208,8 @@ function blob()
 		packages:      build_list,
 	};
 
-	if (defaults) {
-		blob.defaults = defaults;
+	if (init_script) {
+		blob.defaults = init_script;
 	}
 
 	return blob;
