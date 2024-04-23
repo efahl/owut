@@ -12,6 +12,8 @@
 // To dump the list of actions, try this:
 // $ ucode -p 'import { ArgActions } from "owut.argparse"; keys(ArgActions);'
 
+import { cursor } from 'uci';
+
 export const ArgActions = {
 // Static class of standard actions for arguments.
 // All functions have the prototype:
@@ -34,13 +36,15 @@ export const ArgActions = {
 	set: function(self, params) {
 		assert(params.name, "'set' action requires an option name");
 		assert(type(self.options[params.name]) == "bool", `missing default value for '${params.name}'?`);
-		self.options[params.name] = true;
+		let value = exists(params, "value") ? params.value : true;
+		self.options[params.name] = value in [true, "true", 1, "1", "yes", "on"];
 	},
 
 	inc: function(self, params) {
 		assert(params.name, "'inc' action requires an option name");
 		assert(type(self.options[params.name]) == "int", `missing default value for '${params.name}'?`);
-		self.options[params.name]++;
+		let value = exists(params, "value") ? int(params.value) : (self.options[params.name] + 1);
+		self.options[params.name] = value
 	},
 
 	version: function(self, params) {
@@ -179,13 +183,40 @@ export const ArgParser = {
 		return null;
 	},
 
-	parse: function(argv) {
+	get_by_name: function(name) {
+		for (let opt in this) {
+			if (opt.name == name) return opt;
+		}
+		return null;
+	},
+
+	add_config: function(uci_section) {
+		let uci = cursor();
+		for (let file, section in uci_section) {
+			let cfg = uci.get_all(file, section);
+			for (let name, value in cfg) {
+				let opt = this.get_by_name(name);
+				if (opt) {
+					opt.action(this, {name: name, value: value});
+				}
+			}
+		}
+	},
+
+	parse: function(argv, uci_section) {
 		// Parse the argument vector.  If no value for 'argv' is
 		// supplied, then use global ARGV.
+		//
+		// uci_section is an object with file and section names to
+		// be used to override default values.
 
 		argv ??= ARGV;
 
 		this.init();
+
+		if (uci_section) {
+			this.add_config(uci_section);
+		}
 
 		if (this.has_required && length(argv) == 0) {
 			ArgActions.usage_short(this, {suffix: "Try '-h' for full help."});
