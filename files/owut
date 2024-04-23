@@ -54,7 +54,7 @@ function colorize(text, color)
 
 let commands = {
 	dump:     { help: "Collect all resources and dump internal data structures." },
-	check:    { help: "Collect all resources are report stats." },
+	check:    { help: "Collect all resources and report stats." },
 	list:     { help: "Show all the packages installed by user." },
 	blob:     { help: "Display the json blob for the ASU build request." },
 	download: { help: "Build, download and verify an image." },

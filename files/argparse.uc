@@ -26,8 +26,8 @@ export const ArgActions = {
 
 	store: function(self, params) {
 		// We don't flag multiple stores, last one wins.
-		assert(params.name,  "'set' action requires an option name");
-		assert(params.value, "'set' action requires a value");
+		assert(params.name,  "'store' action requires an option name");
+		assert(params.value, "'store' action requires a value");
 		self.options[params.name] = params.value;
 	},
 
