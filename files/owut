@@ -86,15 +86,16 @@ let options = arg_defs.parse(null, {owut: "owut"});
 //------------------------------------------------------------------------------
 
 let ubus;
-let url;
-let build;
-let device;
+let url;      // See initialize_urls
+let build;    // See collect_all for next three
+let device; 
 let release;
 
 
 // Temporary and resource files.
 // We save them all with reasonably recognizable names to aid in debugging.
 let tmp_root = "/tmp/owut-";
+let img_root = match(options.image, /(.*\/|)[^\.]*/)[0];
 let tmp = {
 	bom_json:           `${tmp_root}bom.json`,
 	overview_json:      `${tmp_root}overview.json`,
@@ -111,8 +112,8 @@ let tmp = {
 	build_status_json:  `${tmp_root}build-status.json`,    // Overwritten subsequent responses.
 	rsp_header:         `${tmp_root}rsp-header.txt`,
 
-	firmware_sums:      "/tmp/firmware.sha256sums",        // Expected sha256sums from downloaded firmware.
-	firmware_man:       "/tmp/firmware-manifest.json",     // Manifest of successful build.
+	firmware_sums:      `${img_root}.sha256sums`,          // Expected sha256sums from downloaded firmware.
+	firmware_man:       `${img_root}-manifest.json`,       // Manifest of successful build.
 };
 
 
@@ -1299,7 +1300,7 @@ for (let pkg in packageDB) {
 	}
 }
 
-function blob()
+function blob(report)
 {
 	// Exclude default packages unless explicitly listed in 'packages'.  When
 	// moving between releases, default packages may be added, deleted or
@@ -1335,10 +1336,6 @@ function blob()
 				return null;
 			}
 		}
-
-		if (options.verbose > 0) {
-			printf("Included '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
-		}
 	}
 
 	let blob = {
@@ -1356,6 +1353,9 @@ function blob()
 
 	if (init_script) {
 		blob.defaults = init_script;
+		if (options.verbose > 0 || report) {
+			printf("Included '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
+		}
 	}
 
 	return blob;
@@ -1363,7 +1363,7 @@ function blob()
 
 function json_blob()
 {
-	return sprintf("%J", blob());
+	return sprintf("%J", blob(true));
 }
 
 function show_blob()
@@ -1398,7 +1398,7 @@ function verify_image()
 		return false;
 	}
 
-	printf("Verifying: %s\n", image);
+	printf("Verifying: %s against %s\n", image, tmp.firmware_sums);
 
 	let result = sha256.verify();
 	if (result?.code == 0) {
@@ -1447,8 +1447,8 @@ function download()
 
 	let start = time();
 
-	printf("\nRequesting build ----------------------\n");
 	let response = dl_build(json_blob());
+	printf("\nRequesting build ----------------------\n");
 
 	let hash = response?.request_hash;
 	if (hash) {
