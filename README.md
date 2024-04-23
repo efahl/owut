@@ -4,6 +4,24 @@ When @dangowrt mentioned rewriting `auc` in `ucode`, I took the bait and this is
 
 https://github.com/openwrt/packages/pull/22144#pullrequestreview-1795466339
 
+## Installation
+
+`owut` is currently not packaged properly...  You need a couple of `ucode` modules that are not part of OpenWrt's standard suite.
+
+
+> [!WARNING]
+> As of 2024-04-22, `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running a release version, you are out of luck.
+
+
+```
+$ opkg update
+$ opkg install ucode-mod-uclient ucode-mod-uloop
+
+$ [ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
+$ wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
+$ wget -O /usr/sbin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
+```
+
 ## Usage
 
 ```
@@ -30,7 +48,7 @@ Usage: owut COMMAND [-V VERSION] [-k] [-v] [-I INIT_SCRIPT] [-i IMAGE]
   -k/--keep       - Save all downloaded working files.
   -v/--verbose    - Print various diagnostics.  Repeat for even more output.
   -I/--init-script INIT_SCRIPT - Path to uci-defaults script to run on first boot.
-  -i/--image IMAGE - Where to store downloaded firmware image.
+  -i/--image IMAGE - Image name for download, verify, install and upgrade.
 
 
 $ owut check
