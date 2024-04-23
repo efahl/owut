@@ -5,7 +5,7 @@
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
 // TODO
-// Makefile 
+// Makefile
 // See
 //    openwrt/openwrt/package/network/config/firewall4/Makefile
 //    openwrt/packages/utils/auc/Makefile
@@ -19,9 +19,9 @@
 //    'busybox sha256sum' for checksum calculation
 //    'sysupgrade' for all that stuff
 
-// conf in argparse from /etc/config/<prog>
-// parse fail.html
 // dig through auc ssl_ctx setup and fix uc.ssl_init
+// add options to include new or exclude old packages from build list
+//    --add pkg,pkg,pkg...  --remove pkg,pkg,pkg...
 
 let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
 if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
@@ -279,10 +279,24 @@ function _request(url, dst_file, msg, json_blob)
 	return rsp_status;
 }
 
+function read_tmp_file(file)
+{
+	// Reads 'file', then optionally deletes it.
+	// Return raw text.
+
+	let fd = fs.open(file, "r");
+	let tx = fd.read("all");
+	fd.close();
+	if (! options.keep) {
+		fs.unlink(file);
+	}
+	return tx;
+}
 function read_tmp_json(file)
 {
 	// Read 'file' into a json object, then optionally delete the file.
 	// Primarily used to parse downloads from /tmp.
+
 	let fd = fs.open(file, "r");
 	let js = json(fd);
 	fd.close();
@@ -340,14 +354,8 @@ function dl_fs_conf()
 		exit(1);
 	}
 
-	let input = fs.open(tmp.fs_conf_js, "r");
-	let code = input.read("all");
-	code = replace(code, "var config =", "return");
-	input.close();
-	let data = loadstring(code);
-	if (! options.keep) {
-		fs.unlink(tmp.fs_conf_js);
-	}
+	let code = read_tmp_file(tmp.fs_conf_js);
+	let data = loadstring(replace(code, "var config =", "return"));
 	return data();
 }
 
@@ -359,6 +367,21 @@ function dl_bom()
 	let rsp = _request(url.bom, tmp.bom_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.bom_json);
+	}
+	return null;
+}
+
+function dl_failures()
+{
+	// The build failures info is html that resides in odd, one-man-out URL
+	// locations:
+	//     https://downloads.openwrt.org/snapshots/faillogs/mipsel_24kc/packages/
+	//     https://downloads.openwrt.org/releases/faillogs-23.05/mipsel_24kc/packages/
+
+	let msg = `No package build failures found for ${build.to.version} ${device.arch}`;
+	let rsp = _request(url.failed, tmp.failed_html, msg);
+	if (rsp?.status == 200) {
+		return read_tmp_file(tmp.failed_html);
 	}
 	return null;
 }
@@ -749,7 +772,7 @@ function initialize_urls()
 		downloads_root:  downloads,  // download server base url
 		download:        null,       // with directory at which the "to" build can be found
 		bom:             null,       // BOM for target build
-		failed:          null,       // Failure list html, composed in dl_failures
+		failed:          null,       // Failure list html
 	};
 }
 
@@ -1063,8 +1086,10 @@ function ver_older(v1, v2)
 	return ver_cmp(v1, v2) < 0;
 }
 
-function show_updates()
+function check_updates()
 {
+	let missing = 0;
+
 	printf("Package version changes:\n");
 	let w0 = max(...map(keys(packageDB), length));
 	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
@@ -1078,7 +1103,12 @@ function show_updates()
 		if (old == new) continue;
 
 		changes++;
+		if (old == null) {
+			// This happens when you '--add' a new package.
+			old = colorize("not-installed", Color.YELLOW);
+		}
 		if (new == null) {
+			missing++;
 			new = colorize("missing to-version", Color.RED);
 		}
 		else {
@@ -1089,6 +1119,9 @@ function show_updates()
 		}
 		printf(f0, pkg, data.version, new);
 	}
+	if (missing) {
+		printf("%d packages missing in target version, %s\n", missing, colorize("DO NOT UPGRADE!", Color.RED));
+	}
 	if (changes) {
 		printf("%d packages are out-of-date.\n", changes);
 	}
@@ -1096,10 +1129,58 @@ function show_updates()
 		printf("  All packages are up-to-date.\n");
 	}
 	print("\n");
+
+	return missing == 0;
 }
 
-function checks()
+function check_pkg_builds()
 {
+	// Scraping the failures.html is a total hack.
+	// Let me know if you have an API on downloads (or other build site)
+	// that can give this info.
+	//
+	// The lines we're scraping look like:
+	//    <tr><td class="n"><a href="gummiboot/">gummiboot</a>/</td><td class="s">-</td><td class="d">Tue Apr 23 07:05:36 2024</td></tr>
+
+	let failed = false;
+
+	let html_blob = dl_failures();
+	if (html_blob) {
+		printf("There are currently package build failures for %s %s:\n", build.to.version, device.arch);
+
+		let info = regexp(
+			'<td class="n"><a href="[^<]*">([^<]*)</a>/</td>' +
+			'<td class="s">[^<]*</td>' +
+			'<td class="d">([^<]*)</td>',
+			'g'
+		);
+		let fails = match(html_blob, info);
+		let w0    = max(...map(fails, function(f) { return length(f[1]); }));
+
+		for (let fail in fails) {
+			let pkg  = fail[1];
+			let date = fail[2];
+			let msg;
+			if (is_installed(pkg)) {
+				failed = true;
+				msg = colorize("ERROR: Package installed locally, DO NOT UPGRADE!", Color.RED);
+			}
+			else {
+				msg = "Package not installed locally";
+			}
+			printf(`  %-${w0}s  %s - %s\n`, pkg, date, msg);
+		}
+		if (failed) {
+			printf("%s", colorize("NOTE THE ERRORS ABOVE:", Color.RED));
+		}
+		else {
+			printf("%s", colorize("Failures don't affect you,", Color.GREEN));
+		}
+		printf(" details at\n  %s\n\n", url.failed);
+
+	}
+
+	return ! failed;
 }
 
 function tests()
@@ -1500,8 +1581,8 @@ switch (options.command) {
 	case "check":
 		collect_all();
 		show_config();
-		show_updates();
-		checks();
+		check_updates();
+		check_pkg_builds();
 		break;
 
 	case "blob":
@@ -1513,7 +1594,8 @@ switch (options.command) {
 	case "upgrade":
 		collect_all();
 		show_config();
-		show_updates();
+		if (! check_updates()) break;
+		if (! check_pkg_builds()) break;
 		if (download() && options.command == "upgrade") {
 			install();
 		}
@@ -1532,8 +1614,8 @@ switch (options.command) {
 	case "_test":
 		collect_all();
 		show_config();
-		show_updates();
-		checks();
+		check_updates();
+		check_pkg_builds();
 		tests();
 		break;
 

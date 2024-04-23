@@ -13,13 +13,14 @@ https://github.com/openwrt/packages/pull/22144#pullrequestreview-1795466339
 > As of 2024-04-22, `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running a release version, you are out of luck.
 
 
-```
-$ opkg update
-$ opkg install ucode-mod-uclient ucode-mod-uloop
+```bash
+opkg update
+opkg install ucode-mod-uclient ucode-mod-uloop
 
-$ [ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
-$ wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
-$ wget -O /usr/sbin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
+[ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
+wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
+wget -O /usr/sbin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
+chmod +x /usr/sbin/owut
 ```
 
 ## Usage
@@ -69,19 +70,24 @@ Default         46 packages
 User-installed  51 packages (top-level only)
 
 Package version changes:
-  base-files                   1588~d668c74fe6                            1589~f0c215f700
-  curl                         8.7.1-rr1                                  8.7.1-r2
-  kmod-amazon-ena              6.1.82-r1                                  6.1.86-r1
-  kmod-amd-xgbe                6.1.82-r1                                  6.1.86-r1
-  kmod-bnx2                    6.1.82-r1                                  6.1.86-r1
-  kmod-button-hotplug          6.1.82-r3                                  6.1.86-r3
-  kmod-crypto-acompress        6.1.82-r1                                  6.1.86-r1
+  base-files                 1588~d668c74fe6          1589~f0c215f700
+  curl                       8.7.1-rr1                8.7.1-r2
+  kmod-amazon-ena            6.1.82-r1                6.1.86-r1
+  kmod-amd-xgbe              6.1.82-r1                6.1.86-r1
+  kmod-bnx2                  6.1.82-r1                6.1.86-r1
+  kmod-button-hotplug        6.1.82-r3                6.1.86-r3
+  kmod-crypto-acompress      6.1.82-r1                6.1.86-r1
 ... snip
-  ucode-mod-ubus               2024.02.21~ba3855ae-r1                     2024.04.07~5507654a-r1
-  ucode-mod-uci                2024.02.21~ba3855ae-r1                     2024.04.07~5507654a-r1
-  ucode-mod-uclient            2024.04.05~6c16331e-r1                     2024.04.19~e8780fa7-r1
-  wget-ssl                     1.21.4-r1                                  1.24.5-r1
+  ucode-mod-ubus             2024.02.21~ba3855ae-r1   2024.04.07~5507654a-r1
+  ucode-mod-uci              2024.02.21~ba3855ae-r1   2024.04.07~5507654a-r1
+  ucode-mod-uclient          2024.04.05~6c16331e-r1   2024.04.19~e8780fa7-r1
+  wget-ssl                   1.21.4-r1                1.24.5-r1
 98 packages are out-of-date.
+
+There are currently package build failures for SNAPSHOT x86_64:
+  grilo-plugins  Sun Apr 21 22:45:01 2024 - Package not installed locally
+Failures don't affect you, details at
+  https://downloads.openwrt.org/snapshots/faillogs/x86_64/packages/
 ```
 
 ## License
