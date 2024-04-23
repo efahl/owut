@@ -72,7 +72,7 @@ let arg_defs = proto([
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot." },
-	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Where to store downloaded firmware image." },
+	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(sprintf("owut - OpenWrt Upgrade Tool version %s (%s)", VERSION, sourcepath()));
@@ -1238,8 +1238,6 @@ function blob()
 		}
 	}
 
-//build_list = [ "auc", "file" ]; // TTTTTTTTTTTTTTTTTTTTESSSTINGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGGG
-
 	let init_script;
 	if (options.init_script) {
 		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
@@ -1289,7 +1287,10 @@ function json_blob()
 
 function show_blob()
 {
-	printf("%.4J\n", blob());
+	let b = blob();
+	if (b) {
+		printf("%.4J\n", b);
+	}
 }
 
 function select_image(images)
@@ -1463,6 +1464,15 @@ function download()
 	return false;
 }
 
+function install()
+{
+	// Run sysupgrade to install the image.
+	// Probably need some more options reflected from sysupgrade itself.
+	// '-n' = discard config comes to mind first, maybe '-f' = force, too.
+
+	sysupgrade(options.image);
+}
+
 //------------------------------------------------------------------------------
 
 if (options.verbosity) {
@@ -1500,10 +1510,19 @@ switch (options.command) {
 		break;
 
 	case "download":
+	case "upgrade":
 		collect_all();
 		show_config();
 		show_updates();
-		download();
+		if (download() && options.command == "upgrade") {
+			install();
+		}
+		break;
+	
+	case "install":
+		if (verify_image()) {
+			install();
+		}
 		break;
 
 	case "verify":
