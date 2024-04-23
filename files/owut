@@ -807,6 +807,7 @@ function show_versions()
 	}
 
 	// Lexical sort of numbers is so ugly, only works until we get to x.x.10...
+	push(versions, ...[ "22.03-SNAPSHOT", "23.05-SNAPSHOT"]);
 	versions = sort(versions, version_cmp);
 	print(join("\n  ", versions), "\n\n");
 
