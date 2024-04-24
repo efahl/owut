@@ -53,7 +53,6 @@ function colorize(text, color)
 //------------------------------------------------------------------------------
 
 let commands = {
-	dump:     { help: "Collect all resources and dump internal data structures." },
 	check:    { help: "Collect all resources and report stats." },
 	list:     { help: "Show all the packages installed by user." },
 	blob:     { help: "Display the json blob for the ASU build request." },
@@ -61,6 +60,9 @@ let commands = {
 	verify:   { help: "Verify the downloaded image." },
 	install:  { help: "Install the specified local image." },
 	upgrade:  { help: "Build, download, verify and install an image." },
+
+	versions: { help: "Show available versions." },
+	dump:     { help: "Collect all resources and dump internal data structures." },
 	_test:    { help: null },
 };
 
@@ -273,7 +275,7 @@ function _request(url, dst_file, msg, json_blob)
 	if (options.verbosity > 0) {
 		printf("Downloaded %s to %s\n", url, dst_file);
 	}
-	if (options. verbosity > 1) {
+	if (options.verbosity > 1) {
 		printf("Reponse headers = %.4J\n", rsp_headers);
 	}
 
@@ -308,6 +310,7 @@ function read_tmp_json(file)
 }
 
 //------------------------------------------------------------------------------
+//-- Source-specific downloaders -----------------------------------------------
 
 function dl_board()
 {
@@ -438,6 +441,7 @@ function dl_build_status()
 }
 
 //------------------------------------------------------------------------------
+//-- Package management --------------------------------------------------------
 
 function canonical_name(pkg)
 {
@@ -802,7 +806,7 @@ function version_older(new_version, base_version)
 	return version_cmp(new_version, base_version) < 0;
 }
 
-function show_versions()
+function show_versions(check_version_to)
 {
 	// Grab the ASU overview to get all the available versions, scan that
 	// for version-to and report.
@@ -815,11 +819,11 @@ function show_versions()
 		let conf   = dl_fs_conf();
 		let latest = conf.default_version;
 		versions   = keys(conf.versions);
-		printf("Listing 'version-to' values from %s:\n  ", url.fs_conf);
+		push(versions, ...[ "22.03-SNAPSHOT", "23.05-SNAPSHOT"]);
+		printf("Available 'version-to' values from %s:\n  ", url.fs_conf);
 	}
 	else {
 		let overview = dl_overview();
-
 		let latest   = overview.latest;
 		let branches = overview.branches;
 
@@ -827,19 +831,22 @@ function show_versions()
 		for (let branch, data in branches) {
 			push(versions, ...data.versions);
 		}
-		printf("Listing 'version-to' values from %s:\n  ", url.overview);
+		printf("Available 'version-to' values from %s:\n  ", url.overview);
 	}
 
-	// Lexical sort of numbers is so ugly, only works until we get to x.x.10...
-	push(versions, ...[ "22.03-SNAPSHOT", "23.05-SNAPSHOT"]);
 	versions = sort(versions, version_cmp);
-	print(join("\n  ", versions), "\n\n");
+	print(join("\n  ", versions), "\n");
 
-	let version = build.to.version;
-	if (version in versions)
-		printf("Your version-to '%s' appears valid, so either:\n  1) This build has been removed from the server, or\n  2) The ASU server is having issues.\n", version);
-	else
-		printf("Your specified version-to '%s' is invalid.  Pick one from above.\n", version);
+	if (check_version_to) {
+		let version = build.to.version;
+		if (version in versions)
+			printf("\nYour version-to '%s' appears valid, so either:\n" +
+			       "  1) This build has been removed from the server, or\n" +
+			       "  2) The ASU server is having issues.\n", version);
+		else
+			printf("\nYour specified version-to '%s' is invalid.  " +
+			       "Pick one from above.\n", version);
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -868,7 +875,7 @@ const BuildInfo = {
 	},
 };
 
-function collect_all()
+function collect_device_info()
 {
 	let sysb = ubus.call("system", "board");
 
@@ -903,6 +910,7 @@ function collect_all()
 		sutype = `${sutype}-efi`;
 	}
 
+	// Fix character case of "snapshot" or "-rc" versions.
 	ver_to = uc(ver_to);
 	if (index(ver_to, "RC") > 0)
 		ver_to = lc(ver_to);
@@ -931,6 +939,11 @@ function collect_all()
 		fstype:   sysb.rootfs_type,       // "ext4" or "squashfs"
 		sutype:   sutype,                 // Sysupgrade type, combined, combined-efi or sysupgrade or ???
 	};
+}
+
+function collect_all()
+{
+	collect_device_info();
 
 	let rel_dir;
 	let rel_branch;
@@ -953,7 +966,7 @@ function collect_all()
 	url.platform = `${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json`;
 	let board_json = dl_board();
 	if (! board_json) {
-		show_versions();
+		show_versions(true);
 		exit(1);
 	}
 
@@ -1353,7 +1366,7 @@ function blob(report)
 
 	if (init_script) {
 		blob.defaults = init_script;
-		if (options.verbose > 0 || report) {
+		if (options.verbosity > 0 || report) {
 			printf("Included '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 		}
 	}
@@ -1402,7 +1415,7 @@ function verify_image()
 
 	let result = sha256.verify();
 	if (result?.code == 0) {
-		printf("  Saved sha256 matches\n", image);
+		printf("  Saved sha256 matches\n");
 	}
 	else {
 		let file_sha = sha256.sum(image);
@@ -1568,6 +1581,10 @@ if (! ubus) {
 initialize_urls();
 
 switch (options.command) {
+	case "versions":
+		show_versions(false);
+		break;
+
 	case "dump":
 		collect_all();
 		dump();
