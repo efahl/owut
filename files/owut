@@ -73,7 +73,7 @@ let arg_defs = proto([
 	{ name: "version",     short: "-V", long: "--version-to",  action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
-	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot." },
+	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
 
@@ -1187,7 +1187,7 @@ function check_pkg_builds()
 			printf("%s", colorize("NOTE THE ERRORS ABOVE:", Color.RED));
 		}
 		else {
-			printf("%s", colorize("Failures don't affect you,", Color.GREEN));
+			printf("%s", colorize("Failures don't affect this device,", Color.GREEN));
 		}
 		printf(" details at\n  %s\n\n", url.failed);
 
@@ -1335,7 +1335,7 @@ function blob(report)
 	let init_script;
 	if (options.init_script) {
 		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
-		let inits_file   = fs.open(options.init_script);
+		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
 			warn(`ERROR init script file '${options.init_script}' does not exist\n`);
 			return null;
