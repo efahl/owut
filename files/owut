@@ -210,7 +210,6 @@ function _request(url, dst_file, msg, json_blob)
 		return null;
 	}
 
-	uloop.init();
 	uc = uclient.new(url, null, {
 		header_done: (cb) => {
 			rsp_status  = uc.status();
@@ -1578,6 +1577,10 @@ if (! ubus) {
 	die(`Unable to connect to ubus: ${mod_ubus.error()}\n`);
 }
 
+if (! uloop.init()) {
+	die(`Unable to initialize uloop: ${uloop.error()}\n`);
+}
+
 initialize_urls();
 
 switch (options.command) {
@@ -1641,4 +1644,5 @@ switch (options.command) {
 		break;
 }
 
+uloop.done();
 ubus.disconnect();
