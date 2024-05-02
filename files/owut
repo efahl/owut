@@ -45,9 +45,16 @@ const Color = {
 	RED:    "255;0;0",
 };
 
-function colorize(text, color)
+function color(color)
 {
-	return `\033[38;2;${color}m${text}\033[m`;
+	if (color == "reset")
+		return `\033[m`;
+	return `\033[38;2;${color}m`;
+}
+
+function colorize(text, color_name)
+{
+	return color(color_name) + text + color("reset");
 }
 
 //------------------------------------------------------------------------------
@@ -73,6 +80,8 @@ let arg_defs = proto([
 	{ name: "version",     short: "-V", long: "--version-to",  action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "add",         short: "-a", long: "--add",         action: "store", nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
+	{ name: "remove",      short: "-r", long: "--remove",      action: "store", nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
@@ -92,6 +101,7 @@ let url;      // See initialize_urls
 let build;    // See collect_all for next three
 let device; 
 let release;
+let package_changes; // See apply_pkg_mods
 
 
 // Temporary and resource files.
@@ -120,18 +130,13 @@ let tmp = {
 
 
 let packageDB = {};  // Dictionary mirroring opkg data.
+let packageList;     // Dictionary of package name and version that are available for installation.
 
 let packages = {  // Dictionary of package lists.
 	installed: [],
 	default:   [],
 };
 
-let package_changes = {  // Changes in packages from running release to target.
-	source:     "name-from",  // Required string - name of package in target version
-	target:     "name-to",    // Optional string - if present, name of replaced package in installed version
-	revision:   123,          // Required int - revision at which package change was introduced, see branch.branch_off_rev
-	mandatory:  false,        // Optional bool - if true, then package required in target version
-};
 
 //------------------------------------------------------------------------------
 
@@ -164,7 +169,7 @@ let sha256 = {
 			sums.close();
 			if (line[1] == options.image)
 				return line[0];
-			warn(`ERROR invalid image '${line[1]}', but expected '${options.image}' in sum file\n`);
+			warn(`ERROR: invalid image '${line[1]}', but expected '${options.image}' in sum file\n`);
 		}
 		return null;
 	},
@@ -236,7 +241,7 @@ function _request(url, dst_file, msg, json_blob)
 		},
 
 		error: (cb, code) => {
-			warn(`Error: ${code}\n`);
+			warn(`ERROR: ${code}\n`);
 			uloop.end();
 		},
 	});
@@ -315,7 +320,7 @@ function dl_board()
 {
 	// Get the starting point for the target build.
 
-	let msg = "ERROR Could not download platform json.";
+	let msg = "ERROR: Could not download platform json.";
 	let rsp = _request(url.platform, tmp.platform_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.platform_json);
@@ -332,7 +337,7 @@ function dl_overview()
 	// more useful items.  It can be found at:
 	//     $url.api_root/branches.json
 
-	let msg = `FATAL ERROR could not download '${url.overview}', aborting.`;
+	let msg = `FATAL ERROR: could not download '${url.overview}', aborting.`;
 	let rsp = _request(url.overview, tmp.overview_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.overview_json);
@@ -349,7 +354,7 @@ function dl_fs_conf()
 	//
 	// This is hacky and fragile, parsing JS into ucode, then running it.
 
-	let msg = `FATAL ERROR could not download '${url.fs_conf}', aborting.`;
+	let msg = `FATAL ERROR: could not download '${url.fs_conf}', aborting.`;
 	let rsp = _request(url.fs_conf, tmp.fs_conf_js, msg);
 	if (rsp?.status != 200) {
 		warn(`Response status: ${rsp?.status}\n`);
@@ -366,7 +371,7 @@ function dl_bom()
 {
 	// Download the platform BOM.
 
-	let msg = `ERROR Could not access BOM for ${build.to.version}, kernel version cannot be determined`;
+	let msg = `ERROR: Could not access BOM for ${build.to.version}, kernel version cannot be determined`;
 	let rsp = _request(url.bom, tmp.bom_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.bom_json);
@@ -394,7 +399,7 @@ function dl_package_versions()
 	// Downloads and consolidates the two sources of package versions into
 	// a single object.
 
-	let msg = `ERROR Could not download package list to determine versions`;
+	let msg = `ERROR: Could not download package list to determine versions`;
 	let rsp = _request(url.pkg_arch, tmp.pkg_arch_json, msg);
 	if (rsp?.status != 200) return null;
 	rsp = _request(url.pkg_plat, tmp.pkg_platform_json, msg);
@@ -419,7 +424,7 @@ function dl_build(config)
 		}
 	}
 
-	let msg = `ERROR Failed to initiate build`;
+	let msg = `ERROR: Failed to initiate build`;
 	let rsp = _request(url.build, tmp.build_json, msg, config);
 	if (rsp) {
 		return read_tmp_json(tmp.build_json);
@@ -432,7 +437,7 @@ function dl_build_status()
 	// The response is considered valid even if status != 200, as this is the
 	// ongoing status query.  See switch cases in 'download' function.
 
-	let msg = `ERROR Failed to get build status response`;
+	let msg = `ERROR: Failed to get build status response`;
 	if (_request(url.build_status, tmp.build_status_json, msg)) {
 		return read_tmp_json(tmp.build_status_json);
 	}
@@ -527,21 +532,104 @@ function is_installed(pkg)
 	return pkg in packageDB;
 }
 
-function in_packages(pkg)
+function in_package_lists(pkg)
 {
-	// Search for a given package in both the platform and arch package lists.
+	// Search for a given package in the combined platform/arch package list.
+	pkg = canonical_name(pkg);
+	return pkg in packageList;
+}
 
-/*
-we haven't read these yet...
-	[ -n "$(jsonfilter -i $pkg_pkg_platform_json -e "\$.packages['${pkg}']")" ] && return 0
-	[ -n "$(jsonfilter -i $pkg_pkg_arch_json     -e "\$['${pkg}']")"          ] && return 0
-	local alias=$(provides_what "$pkg")
-	[ -n "$alias" ] && [ "$alias" != "$pkg" ] && in_packages "$alias" && return 0
-	return 1
-*/
+function add_package(pkg)
+{
+	pkg = canonical_name(pkg);
+	if (is_installed(pkg)) {
+		return true;
+	}
+	if (! in_package_lists(pkg)) {
+		warn(`ERROR: package '${pkg}' is not available on this platform\n`);
+		return false;
+	}
+
+// TODO collect all of abi_version versioned depends provides conflicts etc...
+// TODO check for conflicts and error out
+// TODO recursively add all dependencies
+	packageDB[pkg] = {
+		version:     null,
+		new_version: packageList[pkg],
+	};
+	return true;
+}
+
+function remove_package(pkg)
+{
+	pkg = canonical_name(pkg);
+	if (! is_installed(pkg)) {
+		let msg = `WARNING: package '${pkg}' cannot be removed because it is not installed`;
+		if (! in_package_lists(pkg)) {
+			msg += ".  Did you misspell the package name?";
+		}
+		warn(msg + "\n");
+		return false;
+	}
+	delete packageDB[pkg];
+	return true;
+}
+
+function replace_package(pkg)
+{
 }
 
 //------------------------------------------------------------------------------
+
+function apply_pkg_mods()
+{
+	// package_changes - see check_replacements in pkg_scan
+	// --add    - verify in available
+	// --remove - verify in installed
+	//
+	// package_changes = [
+	//   {
+	//     source:    "name-from",  // Required string - name of package in target version
+	//     target:    "name-to",    // Optional string - if present, name of replaced package in installed version
+	//     revision:  123,          // Required int - revision at which package change was introduced
+	//     mandatory: false,        // Optional bool - if true, then package required in target version
+	//   },
+	//   ...
+	// ];
+	let errors      = 0;
+	let overview    = dl_overview();
+	package_changes = overview.branches[release.branch].package_changes;
+
+	let rev_num = build.to.rev_num();
+	for (let chg in package_changes) {
+		if (chg.revision <= rev_num) {
+			if (chg.mandatory) {
+				if (! is_installed(chg.source)) {
+					if (! add_package(chg.src)) {
+						errors++;
+					}
+				}
+			}
+			else if (chg.target) {
+				// replace chg.target with chg.source
+			}
+		}
+	}
+
+	// Do removals first, so any conflicts are suppressed.
+	for (let pkg in split(options.remove, ",")) {
+		if (! remove_package(pkg)) {
+			errors++;
+		}
+	}
+	for (let pkg in split(options.add, ",")) {
+		if (! add_package(pkg)) {
+			errors++;
+		}
+	}
+	
+	return errors == 0;
+}
 
 function collect_packages()
 {
@@ -561,7 +649,7 @@ function collect_packages()
 	//             provides:    [ "prvs", ... ],
 	//             conflicts:   [ "cons", ... ]
 	// candidates?
-	// default: false, missing: false, keep?: true, ??? },
+	// default: false, missing: false, keep?: true, more???
 	//
 	//         },
 	//         "pkg2": {
@@ -663,15 +751,20 @@ function collect_packages()
 		}
 	}
 
-	packageDB = sort(packageDB);
-
-	let pkg_versions = dl_package_versions();
-	for (let pkg, ver in pkg_versions) {
+	packageList = dl_package_versions();
+	for (let pkg, ver in packageList) {
 		pkg = canonical_name(pkg);
 		if (pkg in packageDB) {
 			packageDB[pkg].new_version = ver;
 		}
 	}
+
+	if (! apply_pkg_mods()) {
+		warn(`Errors collecting package data, terminating...\n`);
+		exit(1);
+	}
+
+	packageDB = sort(packageDB);
 }
 
 function changed_defaults()
@@ -682,7 +775,7 @@ function changed_defaults()
 
 	for (let pkg in packages.default) {
 		if (what_provides(pkg)) {
-			printf("default is goofy %-15s %s\n", pkg, what_provides(pkg));
+			printf("default is goofy %-15s %s\n", pkg, what_provides(pkg)); // TODO
 		}
 	}
 	return filter(
@@ -869,7 +962,7 @@ const BuildInfo = {
 	rev_num: function() {
 		// Extracts the revision number from the revision code:
 		//     "r23630-842932a63d" -> 23630
-		let m = match(this.rev_code, /r(.*)-(.*)/);
+		let m = match(this.rev_code, /r(\d*)-(.*)/);
 		return m ? int(m[1]) : 0;
 	},
 };
@@ -1030,7 +1123,6 @@ function collect_all()
 //      let ver = packages[pkg];
 //      printf("%s = %s\n", pkg, ver);
 //  }
-
 }
 
 //------------------------------------------------------------------------------
@@ -1106,7 +1198,7 @@ function check_updates()
 	printf("Package version changes:\n");
 	let w0 = max(...map(keys(packageDB), length));
 	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
-	let f0 =`  %-${w0}s  %-${w1}s %s\n`;
+	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let changes = 0, new = '';
 	for (let pkg, data in packageDB) {
 		if (pkg in [ "kernel", "libc" ]) continue;
@@ -1116,22 +1208,24 @@ function check_updates()
 		if (old == new) continue;
 
 		changes++;
+		let c1 = "";
+		let c2 = "";
 		if (old == null) {
 			// This happens when you '--add' a new package.
-			old = colorize("not-installed", Color.YELLOW);
+			c1  = color(Color.YELLOW);
+			old = "not-installed";
 		}
 		if (new == null) {
 			missing++;
-			new = colorize("missing to-version", Color.RED);
+			c2  = color(Color.RED);
+			new = "missing to-version";
 		}
 		else {
-			new = colorize(
-				new,
-				ver_older(old, new) ? Color.GREEN : Color.YELLOW
-			);
+			c2  = color(ver_older(old, new) ? Color.GREEN : Color.YELLOW);
 		}
-		printf(f0, pkg, data.version, new);
+		printf(f0, pkg, c1, old, c2, new, color("reset"));
 	}
+
 	if (missing) {
 		printf("%d packages missing in target version, %s\n", missing, colorize("DO NOT UPGRADE!", Color.RED));
 	}
@@ -1337,14 +1431,14 @@ function blob(report)
 		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
 		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
-			warn(`ERROR init script file '${options.init_script}' does not exist\n`);
+			warn(`ERROR: init script file '${options.init_script}' does not exist\n`);
 			return null;
 		}
 		else {
 			init_script = inits_file.read("all");
 			inits_file.close();
 			if (length(init_script) > inits_maxlen) {
-				warn(`ERROR '${options.init_script}' is over the ${inits_maxlen} byte maximum\n`);
+				warn(`ERROR: '${options.init_script}' is over the ${inits_maxlen} byte maximum\n`);
 				return null;
 			}
 		}
@@ -1406,7 +1500,7 @@ function verify_image()
 	let image = options.image;
 
 	if (! fs.access(image)) {
-		warn(`ERROR image file '${image}' does not exist\n`);
+		warn(`ERROR: image file '${image}' does not exist\n`);
 		return false;
 	}
 
@@ -1419,7 +1513,7 @@ function verify_image()
 	else {
 		let file_sha = sha256.sum(image);
 		let expected = sha256.saved_sum();
-		warn(`  ERROR sha256 doesn't match:\n`
+		warn(`  ERROR: sha256 doesn't match:\n`
 		     `    calculated '${file_sha}'\n`
 		     `    saved      '${expected}'\n`);
 		if (! options.keep) {
@@ -1433,7 +1527,7 @@ function verify_image()
 		printf("  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
 	}
 	else {
-		warn("ERROR sysupgrade validation failed:\n");
+		warn("ERROR: sysupgrade validation failed:\n");
 		if (result.stdout) printf("stdout =\n%s\n", result.stdout);
 		if (result.stderr) printf("stderr =\n%s\n", result.stderr);
 		if (! options.keep) {
@@ -1512,7 +1606,7 @@ function download()
 
 				let image = select_image(response.images);
 				if (! image) {
-					warn(`Could not locate an image for ${device.fstype} and ${device.sutype}...`);
+					warn(`Could not locate an image for ${device.fstype} and ${device.sutype}...\n`);
 					return false;
 				}
 
@@ -1524,7 +1618,7 @@ function download()
 
 				printf("Image: %s\n", img);
 
-				let msg = `ERROR Couldn't download image ${image.name}`;
+				let msg = `ERROR: Couldn't download image ${image.name}`;
 				let rsp = _request(img, dst, msg);
 				if (rsp?.status != 200) {
 					// need more output here, if 404 or whatever
@@ -1550,7 +1644,7 @@ function download()
 				if (response.error ) printf("error  =\n%s\n", response.error);
 				if (response.stdout) printf("stdout =\n%s\n", response.stdout);
 				if (response.stderr) printf("stderr =\n%s\n", response.stderr);
-				printf("ERROR build failed with status %s.\n", status);
+				printf("ERROR: build failed with status %s.\n", status);
 				return false;
 		}
 	}
