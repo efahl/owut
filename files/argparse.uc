@@ -10,7 +10,7 @@
 // command line, then 'usage' is called.
 //
 // To dump the list of actions, try this:
-// $ ucode -p 'import { ArgActions } from "owut.argparse"; keys(ArgActions);'
+// $ ucode -p 'import { ArgActions } from "utils.argparse"; keys(ArgActions);'
 
 import { cursor } from 'uci';
 
