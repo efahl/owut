@@ -22,6 +22,7 @@
 // dig through auc ssl_ctx setup and fix uc.ssl_init
 // add options to include new or exclude old packages from build list
 //    --add pkg,pkg,pkg...  --remove pkg,pkg,pkg...
+// look at 'Default package analysis' in pkg_scan...
 
 let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
 if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
@@ -1450,7 +1451,7 @@ function blob(report)
 		profile:       device.platform,  // sanitized board name
 
 		version:       build.to.version,
-		version_code:  build.to.rev_code,
+		// version_code:  build.to.rev_code,
 		filesystem:    device.fstype,
 
 		diff_packages: contains_defaults,
