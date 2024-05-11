@@ -6,8 +6,8 @@ https://github.com/openwrt/packages/pull/22144#pullrequestreview-1795466339
 
 ## Installation
 
-`owut` is currently not packaged properly...  You need a couple of `ucode` modules that are not part of OpenWrt's standard suite.
-
+`owut` is currently not packaged properly...  You need a couple of `ucode`
+modules that are not part of OpenWrt's standard suite.
 
 > [!WARNING]
 > As of 2024-04-22, `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running a release version, you are out of luck.
@@ -21,6 +21,10 @@ opkg install ucode-mod-uclient ucode-mod-uloop
 wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
 wget -O /usr/sbin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
 chmod +x /usr/sbin/owut
+
+# Keep it installed across upgrades.
+echo '/usr/share/ucode/utils/argparse.uc' >> /etc/sysupgrade.conf
+echo '/usr/sbin/owut' >> /etc/sysupgrade.conf
 ```
 
 ## Usage
@@ -93,6 +97,21 @@ There are currently package build failures for SNAPSHOT x86_64:
   grilo-plugins  Sun Apr 21 22:45:01 2024 - Package not installed locally
 Failures don't affect you, details at
   https://downloads.openwrt.org/snapshots/faillogs/x86_64/packages/
+```
+
+`owut` supports option settings in the config file.  These are read before
+processing the command line arguments, so for example `owut --rootfs-size 512`
+will override the 256 specified in the config file.  There's currently no way
+to disable a boolean toggle from the command line once it has been set, so the
+`keep` example below will always be used until you edit the config and change it.
+
+```
+$ cat /etc/config/owut
+config owut 'owut'
+        option keep         1  # Always keep the downloaded metadata files.
+        option init_script  '/root/bin/my-init-script.sh'
+        option rootfs_size  256   # Bump root FS size up to 256MB.
+
 ```
 
 ## License
