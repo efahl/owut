@@ -31,12 +31,11 @@ owut - OpenWrt Upgrade Tool version 24.0.0 (/usr/sbin/owut)
 
 owut is an upgrade tool for OpenWrt.
 
-Usage: owut COMMAND [-V VERSION] [-k] [-v] [-I INIT_SCRIPT] [-i IMAGE]
+Usage: owut COMMAND [-V VERSION] [-k] [-v] [-a ADD] [-r REMOVE] [-I INIT_SCRIPT] [-F FSTYPE] [-S ROOTFS_SIZE] [-i IMAGE]
   -h/--help       - Show this message and quit.
   --version       - Show the program version and terminate.
 
   COMMAND - Sub-command to execute, must be one of:
-    dump     - Collect all resources and dump internal data structures.
     check    - Collect all resources and report stats.
     list     - Show all the packages installed by user.
     blob     - Display the json blob for the ASU build request.
@@ -44,11 +43,17 @@ Usage: owut COMMAND [-V VERSION] [-k] [-v] [-I INIT_SCRIPT] [-i IMAGE]
     verify   - Verify the downloaded image.
     install  - Install the specified local image.
     upgrade  - Build, download, verify and install an image.
+    versions - Show available versions.
+    dump     - Collect all resources and dump internal data structures.
 
   -V/--version-to VERSION - Specify the target version, defaults to installed version.
   -k/--keep       - Save all downloaded working files.
   -v/--verbose    - Print various diagnostics.  Repeat for even more output.
-  -I/--init-script INIT_SCRIPT - Path to uci-defaults script to run on first boot.
+  -a/--add ADD    - Comma-separated list of new packages to add to build list.
+  -r/--remove REMOVE - Comma-separated list of installed packages to remove from build list.
+  -I/--init-script INIT_SCRIPT - Path to uci-defaults script to run on first boot ('-' use stdin).
+  -F/--fstype FSTYPE - Desired root file system type (squashfs, ext4, ubifs, jffs2).
+  -S/--rootfs-size ROOTFS_SIZE - Root file system size in MB.
   -i/--image IMAGE - Image name for download, verify, install and upgrade.
 
 

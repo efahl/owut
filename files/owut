@@ -84,6 +84,8 @@ let arg_defs = proto([
 	{ name: "add",         short: "-a", long: "--add",         action: "store", nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
 	{ name: "remove",      short: "-r", long: "--remove",      action: "store", nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
+	{ name: "fstype",      short: "-F", long: "--fstype",      action: "store", nargs: 1, default: null,  help: "Desired root file system type (squashfs, ext4, ubifs, jffs2)." },
+	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store", nargs: 1, default: null,  help: "Root file system size in MB." },
 	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
 
@@ -572,7 +574,7 @@ function remove_package(pkg)
 		warn(msg + "\n");
 		return false;
 	}
-	delete packageDB[pkg];
+	delete packageDB[pkg];  // NO this is completely wrong, just set to-ver to null or something...
 	return true;
 }
 
@@ -1354,7 +1356,7 @@ for (let pkg in packageDB) {
 	if (true) {
 		// Test a handful of packages;
 		for (let pkg in [
-			"libncurses6", "libncursesw", "libncurses", "libncursesw6",
+			"iptables", "libncurses6", "libncursesw", "libncurses", "libncursesw6",
 			"dropbear", "vim", "vim-full", "dnsmasq", "dnsmasq-full", "bort"
 		]) {
 			printf("%s\n", pkg);
@@ -1445,6 +1447,12 @@ function blob(report)
 		}
 	}
 
+	let fstype = device.fstype;
+	if (options.fstype) {
+		// Needs some error checks.
+		fstype = options.fstype;
+	}
+
 	let blob = {
 		client:        "owut/" + VERSION,
 		target:        device.target,
@@ -1457,6 +1465,11 @@ function blob(report)
 		diff_packages: contains_defaults,
 		packages:      build_list,
 	};
+
+	if (options.rootfs_size) {
+		// Needs some error and reasonableness checks.
+ 		blob.rootfs_size_mb = options.rootfs_size;
+	}
 
 	if (init_script) {
 		blob.defaults = init_script;
