@@ -97,6 +97,29 @@ arg_defs.set_bookends(
 
 let options = arg_defs.parse(null, {owut: "owut"});
 
+function ap_check()
+{
+	// HACK add per-option checks and overarching check to ArgParser
+	if (options.rootfs_size) {
+		let rootfs_size = int(options.rootfs_size);
+		if (rootfs_size >= 1 && rootfs_size <= 1024)
+			options.rootfs_size = rootfs_size;
+		else {
+			// See BuildRequest schema at https://sysupgrade.openwrt.org/ui/
+			warn(`ERROR: --rootfs-size '${rootfs_size}' is out of range 1-1024\n`);
+			exit(1);
+		}
+	}
+
+	if (options.fstype) {
+		if (! (options.fstype in ["squashfs", "ext4", "ubifs", "jffs2"])) {
+			warn(`ERROR: --fstype '${options.fstype}' invalid, must be one of squashfs, ext4, ubifs or jffs2\n`);
+			exit(1);
+		}
+	}
+}
+ap_check();
+
 //------------------------------------------------------------------------------
 
 let ubus;
@@ -991,6 +1014,7 @@ function collect_device_info()
 
 	// BUG sutype = "sdcard" for ??????????
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
+	// Wait, is there also "factory"??? See asu/build.py abt line 246
 	if (match(target, /x86\//)) {  // This might be wrong, what about x86/geode - geos?
 		platform = "generic";
 		sutype   = "combined";
@@ -1448,9 +1472,11 @@ function blob(report)
 	}
 
 	let fstype = device.fstype;
-	if (options.fstype) {
-		// Needs some error checks.
+	if (options.fstype && options.fstype != device.fstype) {
 		fstype = options.fstype;
+		if (options.verbosity > 0 || report) {
+			printf("Build: Change file system type from '%s' to '%s'\n", device.fstype, fstype);
+		}
 	}
 
 	let blob = {
@@ -1460,21 +1486,23 @@ function blob(report)
 
 		version:       build.to.version,
 		// version_code:  build.to.rev_code,
-		filesystem:    device.fstype,
+		filesystem:    fstype,
 
 		diff_packages: contains_defaults,
 		packages:      build_list,
 	};
 
 	if (options.rootfs_size) {
-		// Needs some error and reasonableness checks.
- 		blob.rootfs_size_mb = options.rootfs_size;
+		blob.rootfs_size_mb = options.rootfs_size;
+		if (options.verbosity > 0 || report) {
+			printf("Build: ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
+		}
 	}
 
 	if (init_script) {
 		blob.defaults = init_script;
 		if (options.verbosity > 0 || report) {
-			printf("Included '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
+			printf("Build: Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 		}
 	}
 
@@ -1483,7 +1511,8 @@ function blob(report)
 
 function json_blob()
 {
-	return sprintf("%J", blob(true));
+	let b = blob();
+	return b ? sprintf("%J", b) : null;
 }
 
 function show_blob()
@@ -1518,7 +1547,8 @@ function verify_image()
 		return false;
 	}
 
-	printf("Verifying: %s against %s\n", image, tmp.firmware_sums);
+	let info = fs.stat(image);
+	printf("Verifying: %s (%d bytes) against %s\n", image, info.size, tmp.firmware_sums);
 
 	let result = sha256.verify();
 	if (result?.code == 0) {
@@ -1565,9 +1595,11 @@ function download()
 	// To download the built image:
 	// https://github.com/openwrt/luci/blob/master/applications/luci-app-attendedsysupgrade/htdocs/luci-static/resources/view/attendedsysupgrade/overview.js#L108
 
-	let start = time();
+	let blob = json_blob();
+	if (! blob) return false;
 
-	let response = dl_build(json_blob());
+	let start    = time();
+	let response = dl_build(blob);
 	printf("\nRequesting build ----------------------\n");
 
 	let hash = response?.request_hash;
@@ -1722,8 +1754,14 @@ switch (options.command) {
 	case "upgrade":
 		collect_all();
 		show_config();
-		if (! check_updates()) break;
-		if (! check_pkg_builds()) break;
+		if (! check_updates()) {
+			warn("ERROR: update checks reveal errors, can't proceed\n");
+			break;
+		}
+		if (! check_pkg_builds()) {
+			warn("ERROR: package build checks reveal errors, can't proceed\n");
+			break;
+		}
 		if (download() && options.command == "upgrade") {
 			install();
 		}
