@@ -611,7 +611,7 @@ function apply_pkg_mods()
 	// ];
 	let errors      = 0;
 	let overview    = dl_overview();
-	package_changes = overview.branches[release.branch].package_changes;
+	package_changes = overview.branches[release.branch]?.package_changes;
 
 	let rev_num = build.to.rev_num();
 	for (let chg in package_changes) {
@@ -917,7 +917,7 @@ function show_versions(check_version_to)
 	// for version-to and report.
 
 	let versions;
-	if (true) {
+	if (false) {
 		// Actually, let's ignore ASU server and get the metadata from
 		// the firmware selector, as it keeps a much bigger and more
 		// current list.
@@ -928,6 +928,8 @@ function show_versions(check_version_to)
 		printf("Available 'version-to' values from %s:\n  ", url.fs_conf);
 	}
 	else {
+		// This is more appropriate, in that it drops the still-available
+		// but out-of-support versions.
 		let overview = dl_overview();
 		let latest   = overview.latest;
 		let branches = overview.branches;
@@ -1627,6 +1629,7 @@ function download()
 					printf("build_at       = %s\n",   response.build_at);
 					printf("version_number = %s\n",   response.version_number);
 					printf("version_code   = %s\n",   response.version_code);
+					printf("rootfs_size_mb = %s\n",   response.request.rootfs_size_mb || "default");
 				}
 				if (options.verbosity > 1) {
 					printf("images = %.4J\n", response.images);
