@@ -59,6 +59,13 @@ function colorize(text, color_name)
 	return color(color_name) + text + color("reset");
 }
 
+function _exit(status)
+{
+	fs.stdout.flush();
+	fs.stderr.flush();
+	exit(status);
+}
+
 //------------------------------------------------------------------------------
 
 let commands = {
@@ -350,7 +357,7 @@ function dl_overview()
 	}
 	warn(`Response status: ${rsp?.status}\n`);
 	warn(msg+"\n");
-	exit(1);
+	_exit(1);
 }
 
 function dl_fs_conf()
@@ -365,7 +372,7 @@ function dl_fs_conf()
 	if (rsp?.status != 200) {
 		warn(`Response status: ${rsp?.status}\n`);
 		warn(msg+"\n");
-		exit(1);
+		_exit(1);
 	}
 
 	let code = read_tmp_file(tmp.fs_conf_js);
@@ -767,7 +774,7 @@ function collect_packages()
 
 	if (! apply_pkg_mods()) {
 		warn(`Errors collecting package data, terminating...\n`);
-		exit(1);
+		_exit(1);
 	}
 
 	packageDB = sort(packageDB);
@@ -1066,7 +1073,7 @@ function collect_all()
 	let board_json = dl_board();
 	if (! board_json) {
 		show_versions(true);
-		exit(1);
+		_exit(1);
 	}
 
 	device.arch         = board_json.arch_packages;
@@ -1772,3 +1779,4 @@ switch (options.command) {
 
 uloop.done();
 ubus.disconnect();
+_exit();
