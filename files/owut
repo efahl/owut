@@ -990,6 +990,7 @@ function collect_device_info()
 	let platform = sysb.board_name;
 	let ver_from = sysb.release.version;
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade
+	let fstype   = options.fstype ? options.fstype : sysb.rootfs_type;
 
 	let ver_to;
 	if (options.version)
@@ -1034,6 +1035,7 @@ function collect_device_info()
 			version:    ver_to,                 // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
 			rev_code:   null,                   // Build number from target
 			kver:       null,                   // Kernel version of target build, extracted from BOM
+			fstype:     fstype,                 // Requested root FS type
 			img_prefix: null,                   // Prefix of image being built
 			img_file:   null,                   // Full image name to download and install
 			date:       null,                   // Build date of target
@@ -1110,7 +1112,7 @@ function collect_all()
 	build.to.kver = ver;
 
 	for (let img in board_json.images) {
-		if (img.type == device.sutype && img.filesystem == device.fstype) {
+		if (img.type == device.sutype && img.filesystem == build.to.fstype) {
 			build.to.img_file = img.name;
 			break;
 		}
@@ -1172,6 +1174,7 @@ function show_config()
 		`Package-arch   ${device.arch}\n`
 		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kver})\n`
 		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kver})${downgrade}\n`
+		`Build-FS-type  ${build.to.fstype}\n`
 		`Build-at       ${build.to.date}\n`
 		`Image-prefix   ${build.to.img_prefix}\n`
 		`Image-file     ${build.to.img_file}\n`
@@ -1460,12 +1463,8 @@ function blob(report)
 		}
 	}
 
-	let fstype = device.fstype;
-	if (options.fstype && options.fstype != device.fstype) {
-		fstype = options.fstype;
-		if (options.verbosity > 0 || report) {
-			printf("Build: Change file system type from '%s' to '%s'\n", device.fstype, fstype);
-		}
+	if (build.to.fstype != device.fstype && (options.verbosity > 0 || report)) {
+		printf("Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
 
 	let blob = {
@@ -1475,7 +1474,7 @@ function blob(report)
 
 		version:       build.to.version,
 		// version_code:  build.to.rev_code,
-		filesystem:    fstype,
+		filesystem:    build.to.fstype,
 
 		diff_packages: contains_defaults,
 		packages:      build_list,
@@ -1515,7 +1514,7 @@ function show_blob()
 function select_image(images)
 {
 	for (let image in images) {
-		if (image.filesystem == device.fstype && image.type == device.sutype) {
+		if (image.filesystem == build.to.fstype && image.type == device.sutype) {
 			return image;
 		}
 	}
@@ -1642,7 +1641,7 @@ function download()
 
 				let image = select_image(response.images);
 				if (! image) {
-					warn(`Could not locate an image for ${device.fstype} and ${device.sutype}...\n`);
+					warn(`Could not locate an image for ${build.to.fstype} and ${device.sutype}...\n`);
 					return false;
 				}
 
