@@ -13,6 +13,7 @@
 // $ ucode -p 'import { ArgActions } from "utils.argparse"; keys(ArgActions);'
 
 import { cursor } from 'uci';
+import { isnan  } from 'math';
 
 export const ArgActions = {
 // Static class of standard actions for arguments.
@@ -33,6 +34,35 @@ export const ArgActions = {
 		self.options[params.name] = params.value;
 	},
 
+	store_int: function(self, params) {
+		assert(params.name,  "'store_int' action requires an option name");
+		assert(params.value, "'store_int' action requires a value");
+
+		let value = int(params.value);
+		let error = null;
+		if (isnan(value))
+			error = `invalid integer '${params.value}'`;
+		else if ("lower" in this && value < this.lower)
+			error = `${value} below lower bound ${this.lower}`;
+		else if ("upper" in this && value > this.upper)
+			error = `${value} above upper bound ${this.upper}`;
+
+		if (error) this.usage_short(self, {exit: 1, prefix: `ERROR: ${error}`});
+		self.options[params.name] = value;
+	},
+
+	enum: function(self, params) {
+		assert(params.name,  "'enum' action requires an option name");
+		assert(params.value, "'enum' action requires a value");
+		assert(this.one_of,  "'enum' requires a 'one_of' list of values");
+
+		if (! (params.value in this.one_of)) {
+			let msg = `'${params.name}' must be one of ${join(", ", this.one_of)}, not '${params.value}'`;
+			this.usage_short(self, {exit: 1, prefix: `ERROR: ${msg}`});
+		}
+		self.options[params.name] = params.value;
+	},
+
 	set: function(self, params) {
 		assert(params.name, "'set' action requires an option name");
 		assert(type(self.options[params.name]) == "bool", `missing default value for '${params.name}'?`);
@@ -44,7 +74,7 @@ export const ArgActions = {
 		assert(params.name, "'inc' action requires an option name");
 		assert(type(self.options[params.name]) == "int", `missing default value for '${params.name}'?`);
 		let value = exists(params, "value") ? int(params.value) : (self.options[params.name] + 1);
-		self.options[params.name] = value
+		self.options[params.name] = value;
 	},
 
 	version: function(self, params) {
@@ -73,6 +103,7 @@ export const ArgActions = {
 		if ("prefix" in params) printf("%s\n", params.prefix);
 		printf(`Usage: ${self.program_string} %s\n`, join(" ", shorts));
 		if ("suffix" in params) printf("%s\n", params.suffix);
+		if ("exit" in params) exit(params.exit);
 	},
 
 	usage: function(self, params) {
@@ -109,6 +140,7 @@ export const ArgActions = {
 		}
 
 		if (self.epilogue) print(self.epilogue);
+		if ("exit" in params) exit(params.exit);
 	},
 };
 
@@ -173,8 +205,7 @@ export const ArgParser = {
 			if (position == opt.position) {
 				if (arg in opt.one_of)
 					return opt;
-				ArgActions.usage(this, {msg: `ERROR: '${arg}' is not valid here, expected ${uc(opt.name)}`});
-				exit(1);
+				ArgActions.usage_short(this, {exit: 1, prefix: `ERROR: '${arg}' is not valid here, expected ${uc(opt.name)}`});
 			}
 			if (arg in [opt.short, opt.long]) {
 				return opt;
@@ -219,8 +250,7 @@ export const ArgParser = {
 		}
 
 		if (this.has_required && length(argv) == 0) {
-			ArgActions.usage_short(this, {suffix: "Try '-h' for full help."});
-			exit(1);
+			ArgActions.usage_short(this, {exit: 1, suffix: "Try '-h' for full help."});
 		}
 
 		let iarg = 0;
@@ -231,8 +261,7 @@ export const ArgParser = {
 			iarg++;
 
 			if (! opt) {
-				ArgActions.usage(this, {msg: `ERROR: '${arg}' is not a valid command or option`});
-				exit(1);
+				ArgActions.usage(this, {exit: 1, msg: `ERROR: '${arg}' is not a valid command or option`});
 			}
 
 			let action_args = {};
@@ -244,8 +273,7 @@ export const ArgParser = {
 			}
 			if ("nargs" in opt && opt.nargs > 0) {
 				if (opt.nargs > narg-iarg) {
-					ArgActions.usage(this, {msg: `ERROR: '${arg}' requires ${opt.nargs} values`});
-					exit(1);
+					ArgActions.usage(this, {exit: 1, msg: `ERROR: '${arg}' requires ${opt.nargs} values`});
 				}
 					
 				if (opt.nargs == 1) {

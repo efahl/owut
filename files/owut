@@ -23,6 +23,7 @@
 // add options to include new or exclude old packages from build list
 //    --add pkg,pkg,pkg...  --remove pkg,pkg,pkg...
 // look at 'Default package analysis' in pkg_scan...
+//------------------------------------------------------------------------------
 
 let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
 if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
@@ -74,19 +75,21 @@ let commands = {
 	_test:    { help: null },
 };
 
+let _fstypes = ["squashfs", "ext4", "ubifs", "jffs2"];
+
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
 	ap.DEFAULT_VERSION,
-	{ name: "command",     position: 0, one_of: commands,      action: "store",                           help: "Sub-command to execute" },
-	{ name: "version",     short: "-V", long: "--version-to",  action: "store", nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
-	{ name: "keep",        short: "-k", long: "--keep",        action: "set",             default: false, help: "Save all downloaded working files." },
-	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",             default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
-	{ name: "add",         short: "-a", long: "--add",         action: "store", nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
-	{ name: "remove",      short: "-r", long: "--remove",      action: "store", nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
-	{ name: "init_script", short: "-I", long: "--init-script", action: "store", nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
-	{ name: "fstype",      short: "-F", long: "--fstype",      action: "store", nargs: 1, default: null,  help: "Desired root file system type (squashfs, ext4, ubifs, jffs2)." },
-	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store", nargs: 1, default: null,  help: "Root file system size in MB." },
-	{ name: "image",       short: "-i", long: "--image",       action: "store", nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
+	{ name: "command",     position: 0, one_of: commands,      action: "store",                               help: "Sub-command to execute" },
+	{ name: "version",     short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
+	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "add",         short: "-a", long: "--add",         action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
+	{ name: "remove",      short: "-r", long: "--remove",      action: "store",     nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
+	{ name: "init_script", short: "-I", long: "--init-script", action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
+	{ name: "fstype",      short: "-F", long: "--fstype",      action: "enum",      nargs: 1, default: null,  one_of: _fstypes, help: "Desired root file system type (squashfs, ext4, ubifs, jffs2)." },
+	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store_int", nargs: 1, default: null, lower: 1, upper: 1024, help: "Root file system size in MB." },
+	{ name: "image",       short: "-i", long: "--image",       action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(sprintf("owut - OpenWrt Upgrade Tool version %s (%s)", VERSION, sourcepath()));
@@ -96,29 +99,6 @@ arg_defs.set_bookends(
 );
 
 let options = arg_defs.parse(null, {owut: "owut"});
-
-function ap_check()
-{
-	// HACK add per-option checks and overarching check to ArgParser
-	if (options.rootfs_size) {
-		let rootfs_size = int(options.rootfs_size);
-		if (rootfs_size >= 1 && rootfs_size <= 1024)
-			options.rootfs_size = rootfs_size;
-		else {
-			// See BuildRequest schema at https://sysupgrade.openwrt.org/ui/
-			warn(`ERROR: --rootfs-size '${rootfs_size}' is out of range 1-1024\n`);
-			exit(1);
-		}
-	}
-
-	if (options.fstype) {
-		if (! (options.fstype in ["squashfs", "ext4", "ubifs", "jffs2"])) {
-			warn(`ERROR: --fstype '${options.fstype}' invalid, must be one of squashfs, ext4, ubifs or jffs2\n`);
-			exit(1);
-		}
-	}
-}
-ap_check();
 
 //------------------------------------------------------------------------------
 
