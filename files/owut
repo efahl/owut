@@ -18,10 +18,12 @@
 //    'ucode-mod-uloop'
 //    'busybox sha256sum' for checksum calculation
 //    'sysupgrade' for all that stuff
-
+//
 // dig through auc ssl_ctx setup and fix uc.ssl_init
-// add options to include new or exclude old packages from build list
-//    --add pkg,pkg,pkg...  --remove pkg,pkg,pkg...
+// finish up options to
+//   include new - still needs to do closure on dependencies
+//   exclude old - needs major rework...
+//
 // look at 'Default package analysis' in pkg_scan...
 //------------------------------------------------------------------------------
 
@@ -83,6 +85,8 @@ let commands = {
 };
 
 let _fstypes = ["squashfs", "ext4", "ubifs", "jffs2"];
+let _fslo    = 1;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+let _fshi    = 1024;
 
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
@@ -94,8 +98,8 @@ let arg_defs = proto([
 	{ name: "add",         short: "-a", long: "--add",         action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
 	{ name: "remove",      short: "-r", long: "--remove",      action: "store",     nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
-	{ name: "fstype",      short: "-F", long: "--fstype",      action: "enum",      nargs: 1, default: null,  one_of: _fstypes, help: "Desired root file system type (squashfs, ext4, ubifs, jffs2)." },
-	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store_int", nargs: 1, default: null, lower: 1, upper: 1024, help: "Root file system size in MB." },
+	{ name: "fstype",      short: "-F", long: "--fstype",      action: "enum",      nargs: 1, default: null,  one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
+	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `Root file system size in MB (${_fslo}-${_fshi}).` },
 	{ name: "image",       short: "-i", long: "--image",       action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 ], ap.ArgParser);
 
