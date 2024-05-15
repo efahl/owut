@@ -113,6 +113,15 @@ let options = arg_defs.parse(null, {owut: "owut"});
 
 //------------------------------------------------------------------------------
 
+function log(verbosity, msg)
+{
+	if (options.verbosity >= verbosity) {
+		print(msg);
+	}
+}
+
+//------------------------------------------------------------------------------
+
 let ubus;
 let url;      // See initialize_urls
 let build;    // See collect_all for next three
@@ -549,6 +558,13 @@ function is_installed(pkg)
 	return pkg in packageDB;
 }
 
+function is_essential(pkg)
+{
+	// Marked as "essential" in the package manager's database, so never delete it.
+	pkg = canonical_name(pkg);
+	return packageDB[pkg]?.essential;
+}
+
 function in_package_lists(pkg)
 {
 	// Search for a given package in the combined platform/arch package list.
@@ -577,17 +593,63 @@ function add_package(pkg)
 	return true;
 }
 
-function remove_package(pkg)
+function remove_package(pkg, due_to)
 {
+	// pkg    - the package to remove, if possible.
+	// due_to - the depending, parent package this is being removed causing
+	//          'pkg' to be removed.  Non-null indicates recursive closure.
+
 	pkg = canonical_name(pkg);
+
+	if (is_essential(pkg)) {
+		// Don't waste time on things like 'libc'.
+		// TODO see if there are others, like 'kernel', 'base-files' and such...
+		if (due_to == null) {
+			// User specified this explicitly, so tell them.
+			log(0, `ERROR: package '${pkg}' cannot be removed because it is essential\n`);
+		}
+		return false; 
+	}
+
+	if (due_to != null && is_default(pkg)) {
+		log(0, `WARNING: dependency '${pkg}' will not be removed, you must do so explicitly\n`);
+		return false;
+	}
+
 	if (! is_installed(pkg)) {
 		let msg = `WARNING: package '${pkg}' cannot be removed because it is not installed`;
 		if (! in_package_lists(pkg)) {
 			msg += ".  Did you misspell the package name?";
 		}
-		warn(msg + "\n");
+		log(0, msg + "\n");
 		return false;
 	}
+
+	let refs = what_depends(pkg);
+	log(2, sprintf("INFO: '%s' refs = %s\n", pkg, substr(refs + "", 0, 50)));
+	if (due_to in refs && length(refs) == 1) {
+		// Must be the only thing in refs, otherwise we can't remove it.
+		refs = filter(refs, function(p) { return p != due_to; });
+	}
+	if (length(refs) > 0) {
+		if (due_to == null)
+			log(0, `ERROR: '${pkg}' cannot be removed due to ${length(refs)} dependents\n`);
+		else
+			log(2, sprintf("INFO: '%s' can't be removed, used by '%s'\n", pkg, substr(refs + "", 0, 50)));
+		return false;
+	}
+
+	let deps = depends_what(pkg);  // The packages that should also be removed.
+	for (let dep in deps) {
+		dep = what_provides(dep, true);
+		if (is_essential(dep)) continue;
+
+		log(2, sprintf("INFO: attempt to remove '%s' dependency '%s'\n", pkg, dep));
+		remove_package(dep, pkg);
+	}
+
+	log(1, sprintf("INFO: '%s' removed %s\n", pkg, due_to ? `due to '${due_to}'` : "by user"));
+
 	delete packageDB[pkg];  // NO this is completely wrong, just set to-ver to null or something...
 	return true;
 }
@@ -662,6 +724,7 @@ function collect_packages()
 	//             versioned:   "package-name2023",
 	//             version:     "version-string",
 	//             new_version: "version-string",
+	//             essential:   boolean,
 	//             depends:     [ "deps", ... ],
 	//             provides:    [ "prvs", ... ],
 	//             conflicts:   [ "cons", ... ]
@@ -744,8 +807,13 @@ function collect_packages()
 		else if (m = match(line, /^Version: (.*)/)) {
 			data.version = m[1];
 		}
+		else if (m = match(line, /^Essential: (.*)/)) {
+			data.essential = m[1] == "yes";
+		}
 	}
 	opkg_status.close();
+
+	packageDB["kernel"].essential = true;  // ? Why isn't it already marked?
 
 	if (save && pkg && data) {
 		packageDB[pkg] = data;
@@ -1122,8 +1190,6 @@ function collect_all()
 		}
 	}
 
-	collect_packages();
-
 	// These lists need a lot more structure, "sver:...", "tver:...",
 	// "default:true", "missing:false" and that sort of thing.
 	packages.default = ["kernel"];
@@ -1136,15 +1202,17 @@ function collect_all()
 	packages.default = sort(packages.default);
 
 	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
-//  printf("ubus.error = %s\n", mod_ubus.error());
-//  printf("%s\n", type(installed));
+//	printf("ubus.error = %s\n", mod_ubus.error());
+//	printf("%s\n", type(installed));
 
 	packages.installed = sort(installed.packages);
-//  printf("%.4J\n", packages);
-//  for (let pkg in sort(packages)) {
-//      let ver = packages[pkg];
-//      printf("%s = %s\n", pkg, ver);
-//  }
+//	printf("%.4J\n", packages);
+//	for (let pkg in sort(packages)) {
+//		let ver = packages[pkg];
+//		printf("%s = %s\n", pkg, ver);
+//	}
+
+	collect_packages();
 }
 
 //------------------------------------------------------------------------------
