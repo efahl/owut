@@ -7,7 +7,7 @@
 // All uses of 'assert' in the argparse module indicate programming errors,
 // and never user input errors.  If you define an argument incorrectly,
 // an assertion will be raised, whereas if a user enters an incorrect
-// command line, then 'usage' is called.
+// command line, then 'usage' or 'usage_short' is called.
 //
 // To dump the list of actions, try this:
 // $ ucode -p 'import { ArgActions } from "utils.argparse"; keys(ArgActions);'

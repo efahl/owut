@@ -517,6 +517,7 @@ function what_provides(pkg, return_self)
 	// ??? can this possibly return more than one value (like 'provides_what'
 	// does)?  I don't think it can, unless the package  database is screwed
 	// up somehow.
+	// Oho, see 'wget' - provided by both 'uclient-fetch' and 'wget-ssl'
 
 	for (let pkg_name, data in packageDB) {
 		if (pkg in data.provides) {
@@ -641,6 +642,9 @@ function remove_package(pkg, due_to)
 
 	let deps = depends_what(pkg);  // The packages that should also be removed.
 	for (let dep in deps) {
+		// Dependencies are already in canonical form, but may be an
+		// alias for some variant.  'dnsmasq' might be satisfied by any
+		// of dnsmasq, dnsmasq-full or dnsmasq-dhcpv6.
 		dep = what_provides(dep, true);
 		if (is_essential(dep)) continue;
 
@@ -774,9 +778,10 @@ function collect_packages()
 
 		if (m = match(line, /^Package: (.*)$/)) {
 			if (save && pkg && data) {
+				// 'pkg' is NOT ABI-versioned here.
 				packageDB[pkg] = data;
 			}
-			pkg  = m[1];
+			pkg  = m[1]; // Could be ABI-versioned at this point.
 			save = true;
 			data = {};
 		}
@@ -813,7 +818,7 @@ function collect_packages()
 	}
 	opkg_status.close();
 
-	packageDB["kernel"].essential = true;  // ? Why isn't it already marked?
+	packageDB["kernel"].essential = true;  // Why isn't it already marked?
 
 	if (save && pkg && data) {
 		packageDB[pkg] = data;
@@ -891,7 +896,7 @@ function top_level(src_type)
 	//
 	// Note that this returns installed packages that replace the default
 	// packages, for example, 'dnsmasq-full' instead 'dnsmasq'.  This is
-	// because 'packages.default' contains non-canonical names.
+	// because 'packages.default' contains non-canonical names.<WAIT this is wrong, canonical names are non-ABI-versioned, not the "what provides" names
 
 	let tl;
 	switch (src_type) {
@@ -1202,15 +1207,7 @@ function collect_all()
 	packages.default = sort(packages.default);
 
 	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
-//	printf("ubus.error = %s\n", mod_ubus.error());
-//	printf("%s\n", type(installed));
-
 	packages.installed = sort(installed.packages);
-//	printf("%.4J\n", packages);
-//	for (let pkg in sort(packages)) {
-//		let ver = packages[pkg];
-//		printf("%s = %s\n", pkg, ver);
-//	}
 
 	collect_packages();
 }
@@ -1445,7 +1442,9 @@ for (let pkg in packageDB) {
 		// Test a handful of packages;
 		for (let pkg in [
 			"iptables", "libncurses6", "libncursesw", "libncurses", "libncursesw6",
-			"dropbear", "vim", "vim-full", "dnsmasq", "dnsmasq-full", "bort"
+			"dropbear", "vim", "vim-full", "dnsmasq", "dnsmasq-full",
+			"wget", "wget-ssl", "uclient-fetch",
+			"bort",
 		]) {
 			printf("%s\n", pkg);
 			print('  depends_what  ', depends_what(pkg), '\n');
@@ -1458,37 +1457,7 @@ for (let pkg in packageDB) {
 	}
 
 	if (true) {
-		// Do some forensics on why rpc-sys returns different than what's in opkg DB.
-		printf("Scan rpc-sys list for items missing in DB:\n");
-		for (let pkg in packages.installed) {
-			if (! (pkg in packageDB)) {
-				let alias = what_provides(pkg);
-				if (! (alias in packageDB)) {
-					printf(" pkg in installed, not in DB %s %s\n", pkg, what_provides(pkg));
-				}
-			}
-		}
-		print('\n');
-		printf("Scan opkg DB for items missing in rpc-sys:\n");
-		for (let pkg in packageDB) {
-			if (! (pkg in packages.installed)) {
-				let found = false;
-				for (let alias in provides_what(pkg)) {
-					if (alias in packages.installed) {
-						found = true;
-						break;
-					}
-				}
-				if (! found) {
-					let provides = provides_what(pkg) ?? `only "${pkg}"`;
-					printf(" pkg in DB, not in installed %s, provides %s\n", pkg, provides);
-				}
-			}
-		}
-	}
-
-	if (false) {
-		print('\n');
+		print("what-provides in defaults:\n");
 		for (let pkg in packages.default) {
 			if (what_provides(pkg)) {
 				printf("def renamed %s -> %s\n", pkg, what_provides(pkg));
@@ -1514,6 +1483,7 @@ function blob(report)
 	for (let pkg in packages.default) {
 		let p = what_provides(pkg);
 		if (! (p in build_list)) {
+// TODO what's going on here?
 		}
 	}
 
