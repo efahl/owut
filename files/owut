@@ -498,11 +498,23 @@ function what_depends(pkg)
 	// Given a package, return the list of packages that depend on it.  If the
 	// result is empty, this is a top-level package that must be explicitly
 	// installed.
+	//
+	// We must use all of the aliases for a package, as the various package
+	// 'depends' will contain non-specific names: 'tc' might be from
+	// 'tc-tiny', or 'iptables' from 'iptables-nft'.
+
+	let aliases    = [pkg];
+	let alternates = packageDB[pkg]?.provides;
+	if (alternates) {
+		push(aliases, ...alternates);
+	}
 
 	let result = [];
-	for (let pkg_name, data in packageDB) {
-		if (pkg in data.depends) {
-			push(result, pkg_name);
+	for (let alias in aliases) {
+		for (let pkg_name, data in packageDB) {
+			if (alias in data.depends) {
+				push(result, pkg_name);
+			}
 		}
 	}
 	return length(result) ? result : null;
