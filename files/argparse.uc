@@ -135,7 +135,7 @@ export const ArgActions = {
 					out += arg.long;
 				}
 				if (arg.nargs > 0) out += " " + uc(arg.name);
-				printf("  %-15s - %s\n", out, arg.help);
+				printf("  %-20s - %s\n", out, arg.help);
 			}
 		}
 

@@ -84,9 +84,10 @@ let commands = {
 	_test:    { help: null },
 };
 
-let _fstypes = ["squashfs", "ext4", "ubifs", "jffs2"];
-let _fslo    = 1;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
-let _fshi    = 1024;
+let _fstypes   = ["squashfs", "ext4", "ubifs", "jffs2"];
+let _fslo      = 1;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+let _fshi      = 1024;
+let _list_fmts = ["fs-user", "fs-all", "config"];
 
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
@@ -98,12 +99,13 @@ let arg_defs = proto([
 	{ name: "add",         short: "-a", long: "--add",         action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
 	{ name: "remove",      short: "-r", long: "--remove",      action: "store",     nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
-	{ name: "fstype",      short: "-F", long: "--fstype",      action: "enum",      nargs: 1, default: null,  one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
+	{ name: "fstype",      short: "-F", long: "--fstype",      action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
 	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `Root file system size in MB (${_fslo}-${_fshi}).` },
 	{ name: "image",       short: "-i", long: "--image",       action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
+	{ name: "format",      short: "-f", long: "--format",      action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 ], ap.ArgParser);
 
-arg_defs.set_prog_info(sprintf("owut - OpenWrt Upgrade Tool version %s (%s)", VERSION, sourcepath()));
+arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool version ${VERSION} (${sourcepath()})`);
 arg_defs.set_bookends(
 	"\nowut is an upgrade tool for OpenWrt.\n",
 	"\nThank you!  Come again!\n"
@@ -935,6 +937,22 @@ function top_level(src_type)
 	return filter(keys(packageDB), tl);
 }
 
+function replaced(packages)
+{
+	// Return a list of packages from the defaults that have replacements
+	// in the given list of 'packages'.
+
+	let rep = [];
+	for (let pkg in packages) {
+		for (let w in provides_what(pkg)) {
+			if (is_default(w)) {
+				push(rep, w);
+			}
+		}
+	}
+	return rep;
+}
+
 //------------------------------------------------------------------------------
 
 function initialize_urls()
@@ -1241,6 +1259,32 @@ function dump()
 		printf('"packageDB": %.4J,\n', packageDB);
 	}
 	printf('}\n');
+}
+
+function list()
+{
+	let packages;
+	switch (options.format) {
+		case "config":
+			packages = top_level(SrcType.USER_ONLY);
+			let ctype = "y"; // "y" to install, "m" just build package.
+			for (let pkg in packages) {
+				printf("CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
+			}
+			break;
+
+		case "fs-all":
+			packages = top_level(SrcType.ALL);
+			printf("%s\n", join(" ", packages));
+			break;
+
+		case "fs-user":
+		default:
+			packages = top_level(SrcType.USER_ONLY);
+			push(packages, ...map(replaced(packages), function(x) { return "-"+x }));
+			printf("%s\n", join(" ", packages));
+			break;
+	}
 }
 
 function show_config()
@@ -1778,7 +1822,7 @@ switch (options.command) {
 
 	case "list":
 		collect_all();
-		print(join(" ", top_level(SrcType.USER_ONLY)), "\n");
+		list();
 		break;
 
 	case "check":
