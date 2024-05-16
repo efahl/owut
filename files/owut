@@ -165,7 +165,6 @@ let packages = {  // Dictionary of package lists.
 	default:   [],
 };
 
-
 //------------------------------------------------------------------------------
 
 function _run(command, params)
@@ -487,6 +486,38 @@ function canonical_name(pkg)
 	return pkg;
 }
 
+function what_provides(pkg, return_self)
+{
+	// If a package doesn't appear directly in the installed packages, look
+	// and see if the abstract package name is aliased to an actual package.
+	// vim -> vim-full  or  tc -> tc-tiny
+
+	// ??? can this possibly return more than one value (like 'provides_what'
+	// does)?  I don't think it can, unless the package  database is screwed
+	// up somehow.
+	// Oho, see 'wget' - provided by both 'uclient-fetch' and 'wget-ssl'
+
+	for (let pkg_name, data in packageDB) {
+		if (pkg in data.provides) {
+			return pkg_name;
+		}
+		if (pkg == data?.versioned) {
+			// In case we're provided an ABI-versioned one.
+			return pkg_name;
+		}
+	}
+	return return_self ? pkg : null;
+}
+
+function provides_what(pkg)
+{
+	// Inverse of above.  Given a versioned or variant package, find out what
+	// its base package is named.
+	// vim-full -> vim  or  libjson-script202312041 -> libjson-script
+
+	return packageDB[pkg]?.provides;
+}
+
 function depends_what(pkg)
 {
 	// Given a package, return the list of packages it depends upon, i.e., those
@@ -505,8 +536,12 @@ function what_depends(pkg)
 	// 'depends' will contain non-specific names: 'tc' might be from
 	// 'tc-tiny', or 'iptables' from 'iptables-nft'.
 
-	let aliases    = [pkg];
-	let alternates = packageDB[pkg]?.provides;
+	pkg = what_provides(pkg, true);
+	let aliases = [ pkg ];
+	if (packageDB[pkg]?.versioned) {
+		push(aliases, packageDB[pkg].versioned);
+	}
+	let alternates = provides_what(pkg);
 	if (alternates) {
 		push(aliases, ...alternates);
 	}
@@ -520,34 +555,6 @@ function what_depends(pkg)
 		}
 	}
 	return length(result) ? result : null;
-}
-
-function what_provides(pkg, return_self)
-{
-	// If a package doesn't appear directly in the installed packages, look
-	// and see if the abstract package name is aliased to an actual package.
-	// vim -> vim-full  or  tc -> tc-tiny
-
-	// ??? can this possibly return more than one value (like 'provides_what'
-	// does)?  I don't think it can, unless the package  database is screwed
-	// up somehow.
-	// Oho, see 'wget' - provided by both 'uclient-fetch' and 'wget-ssl'
-
-	for (let pkg_name, data in packageDB) {
-		if (pkg in data.provides) {
-			return pkg_name;
-		}
-	}
-	return return_self ? pkg : null;
-}
-
-function provides_what(pkg)
-{
-	// Inverse of above.  Given a versioned or variant package, find out what
-	// its base package is named.
-	// vim-full -> vim  or  libjson-script202312041 -> libjson-script
-
-	return packageDB[pkg]?.provides;
 }
 
 function is_default(pkg)
@@ -1457,7 +1464,6 @@ for (let pkg in packageDB) {
 		printf('  %3d %-20s  %-3s  %s\n', i, pkg, in_def ? "def" : "-", in_top ? "top" : "-");
 	}
 }
-
 
 	print('\n\n');
 	print('Now the odd ones, non-top-level defaults:\n');
