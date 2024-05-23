@@ -16,6 +16,7 @@
 //    'ucode-mod-uci'
 //    'ucode-mod-uclient'
 //    'ucode-mod-uloop'
+//    'attendedsysupgrade-common'
 //    'busybox sha256sum' for checksum calculation
 //    'sysupgrade' for all that stuff
 //
@@ -679,8 +680,16 @@ function remove_package(pkg, due_to)
 	return true;
 }
 
-function replace_package(pkg)
+function replace_package(old_pkg, new_pkg)
 {
+	// Do optional replacements.  If 'old_pkg' is not installed, then we
+	// have nothing to do but report success.
+
+	if (is_installed(old_pkg)) {
+		remove_package(old_pkg);
+		return add_package(new_pkg);
+	}
+	return true;
 }
 
 //------------------------------------------------------------------------------
@@ -691,31 +700,40 @@ function apply_pkg_mods()
 	// --add    - verify in available
 	// --remove - verify in installed
 	//
+	// Package names in changes are already in canonical form.
 	// package_changes = [
 	//   {
 	//     source:    "name-from",  // Required string - name of package in target version
 	//     target:    "name-to",    // Optional string - if present, name of replaced package in installed version
 	//     revision:  123,          // Required int - revision at which package change was introduced
-	//     mandatory: false,        // Optional bool - if true, then package required in target version
+	//     mandatory: false,        // Optional bool - if true, then force add/remove of target/source, respectively
 	//   },
 	//   ...
 	// ];
+	//
+	// For a case of simple removal, see 'kmod-nft-nat6', which was merged
+	// into 'kmod-nft-nat' in rev 19160.
+	//
+	// if target, then source replaced by target
+	// else source must be removed
+
 	let errors      = 0;
 	let overview    = dl_overview();
 	package_changes = overview.branches[release.branch]?.package_changes;
 
+	// TODO think about downgrades, i.e., when to.rev_num < from.rev_num...
 	let rev_num = build.to.rev_num();
 	for (let chg in package_changes) {
 		if (chg.revision <= rev_num) {
-			if (chg.mandatory) {
-				if (! is_installed(chg.source)) {
-					if (! add_package(chg.src)) {
-						errors++;
-					}
+			if (chg.target) {
+				if (! replace_package(chg.source, chg.target)) {
+					errors++;
 				}
 			}
-			else if (chg.target) {
-				// replace chg.target with chg.source
+			else { // No target, only source, so remove it.
+				if (is_installed(chg.source) && ! remove_package(chg.source)) {
+					errors++;
+				}
 			}
 		}
 	}
@@ -770,6 +788,9 @@ function collect_packages()
 	//
 	// NOTE: We process the dependency list to contain only canonical 'pkg'
 	// names, by scanning the 'provides' lists and replacing aliases.
+	//
+	// Consider moving 'versioned' into 'provides'.  That would cleanup the
+	// 'what_*' functions, is there any need to have it stand separate?
 	//
 	// It appears that the 'conflicts' are not in canonical form, but we
 	// can't pre-process them because
