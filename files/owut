@@ -146,7 +146,7 @@ let tmp = {
 
 	fs_conf_js:         `${tmp_root}config.js`,
 
-	failed_html:        `${tmp_root}failures.html`,
+	failed_html:        `${tmp_root}failures`,
 
 	req_json:           `${tmp_root}build-request.json`,   // The POST body we send.
 	build_json:         `${tmp_root}build-response.json`,  // First response.
@@ -407,17 +407,20 @@ function dl_bom()
 	return null;
 }
 
-function dl_failures()
+function dl_failures(feed)
 {
 	// The build failures info is html that resides in odd, one-man-out URL
 	// locations:
-	//     https://downloads.openwrt.org/snapshots/faillogs/mipsel_24kc/packages/
-	//     https://downloads.openwrt.org/releases/faillogs-23.05/mipsel_24kc/packages/
+	//     https://downloads.openwrt.org/snapshots/faillogs/mipsel_24kc/<feed>/
+	//     https://downloads.openwrt.org/releases/faillogs-23.05/mipsel_24kc/<feed>/
+
+	let uri = feed ? `${url.failed}${feed}/` : url.failed;
+	let htm = `${tmp.failed_html}-${feed ? feed : "feeds"}.html`;
 
 	let msg = `No package build failures found for ${build.to.version} ${device.arch}`;
-	let rsp = _request(url.failed, tmp.failed_html, msg);
+	let rsp = _request(uri, htm, msg);
 	if (rsp?.status == 200) {
-		return read_tmp_file(tmp.failed_html);
+		return read_tmp_file(htm);
 	}
 	return null;
 }
@@ -1223,7 +1226,7 @@ function collect_all()
 	let location = build.to.is_snapshot()
 		     ? "snapshots/faillogs"
 		     : `releases/faillogs-${release.branch}`;
-	url.failed   = `${url.downloads_root}/${location}/${device.arch}/packages/`;
+	url.failed   = `${url.downloads_root}/${location}/${device.arch}/`;
 
 	url.pkg_arch = `${url.static_root}/${release.dir}/packages/${device.arch}-index.json`;
 	url.pkg_plat = `${url.static_root}/${release.dir}/targets/${device.target}/index.json`;
@@ -1433,22 +1436,31 @@ function check_pkg_builds()
 			'<td class="d">([^<]*)</td>',
 			'g'
 		);
-		let fails = match(html_blob, info);
-		let w0    = max(...map(fails, function(f) { return length(f[1]); }));
 
-		for (let fail in fails) {
-			let pkg  = fail[1];
-			let date = fail[2];
-			let msg;
-			if (is_installed(pkg)) {
-				failed = true;
-				msg = colorize("ERROR: Package installed locally, DO NOT UPGRADE!", Color.RED);
+		let feeds = map(match(html_blob, info), function(f) { return f[1]; });
+		for (let feed in feeds) {
+			printf("  Feed: %s\n", feed);
+			html_blob = dl_failures(feed);
+			if (html_blob) {
+				let fails = match(html_blob, info);
+				let w0    = max(...map(fails, function(f) { return max(25, length(f[1])); }));
+
+				for (let fail in fails) {
+					let pkg  = fail[1];
+					let date = fail[2];
+					let msg;
+					if (is_installed(pkg)) {
+						failed = true;
+						msg = colorize("ERROR: Package installed locally, DO NOT UPGRADE!", Color.RED);
+					}
+					else {
+						msg = "Package not installed locally";
+					}
+					printf(`    %-${w0}s  %s - %s\n`, pkg, date, msg);
+				}
 			}
-			else {
-				msg = "Package not installed locally";
-			}
-			printf(`  %-${w0}s  %s - %s\n`, pkg, date, msg);
 		}
+
 		if (failed) {
 			printf("%s", colorize("NOTE THE ERRORS ABOVE:", Color.RED));
 		}
@@ -1456,7 +1468,6 @@ function check_pkg_builds()
 			printf("%s", colorize("Failures don't affect this device,", Color.GREEN));
 		}
 		printf(" details at\n  %s\n\n", url.failed);
-
 	}
 
 	return ! failed;
