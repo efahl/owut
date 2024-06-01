@@ -21,11 +21,10 @@
 //    'sysupgrade' for all that stuff
 //
 // dig through auc ssl_ctx setup and fix uc.ssl_init
+//
 // finish up options to
 //   include new - still needs to do closure on dependencies
 //   exclude old - needs major rework...
-//
-// look at 'Default package analysis' in pkg_scan...
 //------------------------------------------------------------------------------
 
 let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
@@ -699,9 +698,9 @@ function replace_package(old_pkg, new_pkg)
 
 function apply_pkg_mods()
 {
-	// package_changes - see check_replacements in pkg_scan
-	// --add    - verify in available
-	// --remove - verify in installed
+	// 1) Handle 'overview.package_changes'.
+	// 2) Apply user-specified removals.
+	// 3) Apply user-specified additions.
 	//
 	// Package names in changes are already in canonical form.
 	// package_changes = [
@@ -716,9 +715,6 @@ function apply_pkg_mods()
 	//
 	// For a case of simple removal, see 'kmod-nft-nat6', which was merged
 	// into 'kmod-nft-nat' in rev 19160.
-	//
-	// if target, then source replaced by target
-	// else source must be removed
 
 	let errors      = 0;
 	let overview    = dl_overview();
@@ -733,8 +729,9 @@ function apply_pkg_mods()
 					errors++;
 				}
 			}
-			else { // No target, only source, so remove it.
-				if (is_installed(chg.source) && ! remove_package(chg.source)) {
+			else if (is_installed(chg.source)) {
+				// No target, only source, so remove it.
+				if (! remove_package(chg.source)) {
 					errors++;
 				}
 			}
@@ -997,7 +994,7 @@ function initialize_urls()
 	let static     = sysupgrade + "/json/v1";
 	let store      = sysupgrade + "/store";
 	let overview   = static + "/overview.json";
-	let fs_conf     = fs_root + "/config.js";
+	let fs_conf    = fs_root + "/config.js";
 
 	// This should really should be in config somewhere:
 	let downloads  = "https://downloads.openwrt.org";
@@ -1413,6 +1410,38 @@ function check_updates()
 	print("\n");
 
 	return missing == 0;
+}
+
+function check_defaults()
+{
+	// Scan the package defaults to see if they are
+	//    1) missing from the installation or
+	//    2) modified/replaced by some other package.
+
+	let changes = {};
+	for (let pkg in packages.default) {
+		let provider = what_provides(pkg);
+		if (provider) {
+			changes[pkg] = provider;
+		}
+		else if (! is_installed(pkg)) {
+			changes[pkg] = colorize("not-installed", Color.YELLOW);
+		}
+	}
+
+	printf("Default package analysis:\n");
+	if (length(changes) == 0) {
+		printf("  No missing or modified default packages.\n\n");
+	}
+	else {
+		let wid = max(...map(keys(changes), function(f) { return length(f); }));
+		let fmt = `  %-${wid}s   %s\n`;
+		printf(fmt, "Default", "Provided-by");
+		for (let p, a in changes) {
+			printf(fmt, p, a);
+		}
+		printf("\n");
+	}
 }
 
 function check_pkg_builds()
@@ -1867,6 +1896,7 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		check_updates();
+		check_defaults();
 		check_pkg_builds();
 		break;
 
@@ -1883,6 +1913,7 @@ switch (options.command) {
 			warn("ERROR: update checks reveal errors, can't proceed\n");
 			break;
 		}
+		check_defaults();
 		if (! check_pkg_builds()) {
 			warn("ERROR: package build checks reveal errors, can't proceed\n");
 			break;
@@ -1906,6 +1937,7 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		check_updates();
+		check_defaults();
 		check_pkg_builds();
 		tests();
 		break;
