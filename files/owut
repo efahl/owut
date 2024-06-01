@@ -1208,17 +1208,26 @@ function collect_all()
 
 	// We now know enough to finish up the first URL, which will give us the
 	// keys to the rest of them.
-	url.platform = `${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json`;
+	// ASU platform.json often updates days after downloads, so the
+	// 'version_code' is wrong and build requests fail.
+	let use_asu = false;
+	url.platform = use_asu ?
+		`${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json` :
+		`${url.downloads_root}/${rel_dir}/targets/${device.target}/profiles.json`;
+
 	let board_json = dl_board();
 	if (! board_json) {
 		show_versions(true);
 		_exit(1);
 	}
 
+	let prof = use_asu ? board_json : board_json.profiles[device.platform];
+	let d = gmtime(board_json.source_date_epoch);
+
 	device.arch         = board_json.arch_packages;
-	build.to.date       = board_json.build_at;
+	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ", d.year, d.mon, d.mday, d.hour, d.min, d.sec);
 	build.to.rev_code   = board_json.version_code;
-	build.to.img_prefix = board_json.image_prefix;
+	build.to.img_prefix = prof.image_prefix;
 
 	let location = build.to.is_snapshot()
 		     ? "snapshots/faillogs"
@@ -1246,7 +1255,7 @@ function collect_all()
 	}
 	build.to.kver = ver;
 
-	for (let img in board_json.images) {
+	for (let img in prof.images) {
 		if (img.type == device.sutype && img.filesystem == build.to.fstype) {
 			build.to.img_file = img.name;
 			break;
@@ -1259,7 +1268,7 @@ function collect_all()
 	for (let pkg in board_json.default_packages) {
 		push(packages.default, pkg);
 	}
-	for (let pkg in board_json.device_packages) {
+	for (let pkg in prof.device_packages) {
 		push(packages.default, pkg);
 	}
 	packages.default = sort(packages.default);
@@ -1638,7 +1647,7 @@ function blob(report)
 		profile:       device.platform,  // sanitized board name
 
 		version:       build.to.version,
-		// version_code:  build.to.rev_code,
+		version_code:  build.to.rev_code,
 		filesystem:    build.to.fstype,
 
 		diff_packages: contains_defaults,
@@ -1766,7 +1775,7 @@ function download()
 		let status = response.status;
 
 		printf("Status: %d\n", status);
-		printf("Detail: %s", response.detail);
+		printf("Detail: %s", substr(response.detail, 0, 6) == "Error:" ? colorize(response.detail, Color.RED) : response.detail);
 		switch (response.detail) {
 			case "queued":
 				printf(" - %d ahead of you", response.queue_position);
