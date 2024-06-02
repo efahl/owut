@@ -43,23 +43,43 @@ import { isnan  }    from "math";
 import { cursor }    from "uci";
 let uci = cursor();
 
-const Color = {
+//------------------------------------------------------------------------------
+
+const Logger = {
+	_level: 0,
+	set_level: function(lvl) { this._level = lvl; },
+
 	GREEN:  "0;255;0",
 	YELLOW: "255;234;0",
 	RED:    "255;0;0",
+
+	color: function(color_name)
+	{
+		// TODO suppress colorization when stdout is a pipe
+		return color_name == "reset" ? "\033[m" : `\033[38;2;${color_name}m`;
+	},
+
+	colorize: function(color_name, text)
+	{
+		return this.color(color_name) + text + this.color("reset");
+	},
+
+	_out: function(prefix, clr, fmt, ...args)
+	{
+		printf("%s: ", this.colorize(clr, prefix));
+		printf(fmt, ...args);
+	},
+
+	err: function(fmt, ...args) { this._out("ERROR",   this.RED,    fmt, ...args); },
+	wrn: function(fmt, ...args) { this._out("WARNING", this.YELLOW, fmt, ...args); },
+
+	log: function(level, fmt, ...args)
+	{
+		if (this._level >= level) printf(fmt, ...args);
+	},
 };
 
-function color(color)
-{
-	if (color == "reset")
-		return `\033[m`;
-	return `\033[38;2;${color}m`;
-}
-
-function colorize(text, color_name)
-{
-	return color(color_name) + text + color("reset");
-}
+let L = Logger;
 
 function _exit(status)
 {
@@ -113,14 +133,7 @@ arg_defs.set_bookends(
 
 let options = arg_defs.parse(null, {owut: "owut"});
 
-//------------------------------------------------------------------------------
-
-function log(verbosity, msg)
-{
-	if (options.verbosity >= verbosity) {
-		print(msg);
-	}
-}
+L.set_level(options.verbosity);
 
 //------------------------------------------------------------------------------
 
@@ -196,7 +209,7 @@ let sha256 = {
 			sums.close();
 			if (line[1] == options.image)
 				return line[0];
-			warn(`ERROR: invalid image '${line[1]}', but expected '${options.image}' in sum file\n`);
+			L.err("invalid image '%s', but expected '%s' in sum file\n", line[1], options.image);
 		}
 		return null;
 	},
@@ -238,7 +251,7 @@ function _request(url, dst_file, msg, json_blob)
 
 	let output = fs.open(dst_file, "w");
 	if (! output) {
-		warn(`${msg}\nCould not write: ${dst_file}\n`);
+		L.err("%s\nCould not write: %s\n", msg, dst_file);
 		return null;
 	}
 
@@ -268,18 +281,18 @@ function _request(url, dst_file, msg, json_blob)
 		},
 
 		error: (cb, code) => {
-			warn(`ERROR: ${code}\n`);
+			L.err("%s\n", code);
 			uloop.end();
 		},
 	});
 
 	if (! uc.ssl_init({verify: false})) {
-		warn(`${msg}\nFailed to initialize SSL\n`);
+		L.err("%s\nFailed to initialize SSL\n", msg);
 		return null;
 	}
 
 	if (! uc.connect()) {
-		warn(`${msg}\nFailed to connect\n`);
+		L.err("%s\nFailed to connect\n", msg);
 		return null;
 	}
 
@@ -298,17 +311,13 @@ function _request(url, dst_file, msg, json_blob)
 	}
 
 	if (! uc.request(type, args)) {
-		warn(`${msg}\nFailed to send request\n`);
+		L.err("%s\nFailed to send request\n", msg);
 		return null;
 	}
 	uloop.run();
 
-	if (options.verbosity > 0) {
-		printf("Downloaded %s to %s\n", url, dst_file);
-	}
-	if (options.verbosity > 1) {
-		printf("Reponse headers = %.4J\n", rsp_headers);
-	}
+	L.log(1, "Downloaded %s to %s\n", url, dst_file);
+	L.log(2, "Reponse headers = %.4J\n", rsp_headers);
 
 	return rsp_status;
 }
@@ -347,7 +356,7 @@ function dl_board()
 {
 	// Get the starting point for the target build.
 
-	let msg = "ERROR: Could not download platform json.";
+	let msg = "Could not download platform json.";
 	let rsp = _request(url.platform, tmp.platform_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.platform_json);
@@ -364,13 +373,13 @@ function dl_overview()
 	// more useful items.  It can be found at:
 	//     $url.api_root/branches.json
 
-	let msg = `FATAL ERROR: could not download '${url.overview}', aborting.`;
+	let msg = `could not download '${url.overview}', aborting.`;
 	let rsp = _request(url.overview, tmp.overview_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.overview_json);
 	}
-	warn(`Response status: ${rsp?.status}\n`);
-	warn(msg+"\n");
+	L.log(0, "Response status: %s\n", rsp?.status);
+	L.err("%s\n", msg);
 	_exit(1);
 }
 
@@ -381,11 +390,11 @@ function dl_fs_conf()
 	//
 	// This is hacky and fragile, parsing JS into ucode, then running it.
 
-	let msg = `FATAL ERROR: could not download '${url.fs_conf}', aborting.`;
+	let msg = `could not download '${url.fs_conf}', aborting.`;
 	let rsp = _request(url.fs_conf, tmp.fs_conf_js, msg);
 	if (rsp?.status != 200) {
-		warn(`Response status: ${rsp?.status}\n`);
-		warn(msg+"\n");
+		L.log(0, "Response status: %s\n", rsp?.status);
+		L.err("%s\n", msg);
 		_exit(1);
 	}
 
@@ -398,7 +407,7 @@ function dl_bom()
 {
 	// Download the platform BOM.
 
-	let msg = `ERROR: Could not access BOM for ${build.to.version}, kernel version cannot be determined`;
+	let msg = `could not access BOM for ${build.to.version}, kernel version cannot be determined`;
 	let rsp = _request(url.bom, tmp.bom_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.bom_json);
@@ -416,7 +425,7 @@ function dl_failures(feed)
 	let uri = feed ? `${url.failed}${feed}/` : url.failed;
 	let htm = `${tmp.failed_html}-${feed ? feed : "feeds"}.html`;
 
-	let msg = `No package build failures found for ${build.to.version} ${device.arch}`;
+	let msg = "checking build failures";
 	let rsp = _request(uri, htm, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_file(htm);
@@ -429,7 +438,7 @@ function dl_package_versions()
 	// Downloads and consolidates the two sources of package versions into
 	// a single object.
 
-	let msg = `ERROR: Could not download package list to determine versions`;
+	let msg = "could not download package list to determine versions";
 	let rsp = _request(url.pkg_arch, tmp.pkg_arch_json, msg);
 	if (rsp?.status != 200) return null;
 	rsp = _request(url.pkg_plat, tmp.pkg_platform_json, msg);
@@ -444,9 +453,7 @@ function dl_package_versions()
 function dl_build(config)
 {
 	if (options.keep) {
-		if (options.verbosity > 0) {
-			printf("Saving build blob to %s\n", tmp.req_json);
-		}
+		L.log(1, "Saving build blob to %s\n", tmp.req_json);
 		let save = fs.open(tmp.req_json, "w");
 		if (save) {
 			save.write(config);
@@ -454,7 +461,7 @@ function dl_build(config)
 		}
 	}
 
-	let msg = `ERROR: Failed to initiate build`;
+	let msg = "failed to initiate build";
 	let rsp = _request(url.build, tmp.build_json, msg, config);
 	if (rsp) {
 		return read_tmp_json(tmp.build_json);
@@ -467,7 +474,7 @@ function dl_build_status()
 	// The response is considered valid even if status != 200, as this is the
 	// ongoing status query.  See switch cases in 'download' function.
 
-	let msg = `ERROR: Failed to get build status response`;
+	let msg = "failed to get build status response";
 	if (_request(url.build_status, tmp.build_status_json, msg)) {
 		return read_tmp_json(tmp.build_status_json);
 	}
@@ -604,7 +611,7 @@ function add_package(pkg)
 		return true;
 	}
 	if (! in_package_lists(pkg)) {
-		warn(`ERROR: package '${pkg}' is not available on this platform\n`);
+		L.err("package '%s' is not available on this platform\n", pkg);
 		return false;
 	}
 
@@ -631,36 +638,36 @@ function remove_package(pkg, due_to)
 		// TODO see if there are others, like 'kernel', 'base-files' and such...
 		if (due_to == null) {
 			// User specified this explicitly, so tell them.
-			log(0, `ERROR: package '${pkg}' cannot be removed because it is essential\n`);
+			L.err("package '%s' cannot be removed because it is essential\n", pkg);
 		}
 		return false; 
 	}
 
 	if (due_to != null && is_default(pkg)) {
-		log(0, `WARNING: dependency '${pkg}' will not be removed, you must do so explicitly\n`);
+		L.wrn("dependency '%s' will not be removed, you must do so explicitly\n", pkg);
 		return false;
 	}
 
 	if (! is_installed(pkg)) {
-		let msg = `WARNING: package '${pkg}' cannot be removed because it is not installed`;
+		let msg = `package '${pkg}' cannot be removed because it is not installed`;
 		if (! in_package_lists(pkg)) {
 			msg += ".  Did you misspell the package name?";
 		}
-		log(0, msg + "\n");
+		L.wrn("%s\n", msg);
 		return false;
 	}
 
 	let refs = what_depends(pkg);
-	log(2, sprintf("INFO: '%s' refs = %s\n", pkg, substr(refs + "", 0, 50)));
+	L.log(2, "INFO: '%s' refs = %s\n", pkg, substr(refs + "", 0, 50));
 	if (due_to in refs && length(refs) == 1) {
 		// Must be the only thing in refs, otherwise we can't remove it.
 		refs = filter(refs, function(p) { return p != due_to; });
 	}
 	if (length(refs) > 0) {
 		if (due_to == null)
-			log(0, `ERROR: '${pkg}' cannot be removed due to ${length(refs)} dependents\n`);
+			L.err("'%s' cannot be removed due to %d dependents\n", pkg, length(refs));
 		else
-			log(2, sprintf("INFO: '%s' can't be removed, used by '%s'\n", pkg, substr(refs + "", 0, 50)));
+			L.log(2, "INFO: '%s' can't be removed, used by '%s'\n", pkg, substr(refs + "", 0, 50));
 		return false;
 	}
 
@@ -672,11 +679,11 @@ function remove_package(pkg, due_to)
 		dep = what_provides(dep, true);
 		if (is_essential(dep)) continue;
 
-		log(2, sprintf("INFO: attempt to remove '%s' dependency '%s'\n", pkg, dep));
+		L.log(2, "INFO: attempt to remove '%s' dependency '%s'\n", pkg, dep);
 		remove_package(dep, pkg);
 	}
 
-	log(1, sprintf("INFO: '%s' removed %s\n", pkg, due_to ? `due to '${due_to}'` : "by user"));
+	L.log(1, "INFO: '%s' removed %s\n", pkg, due_to ? `due to '${due_to}'` : "by user");
 
 	delete packageDB[pkg];  // NO this is completely wrong, just set to-ver to null or something...
 	return true;
@@ -892,7 +899,7 @@ function collect_packages()
 	}
 
 	if (! apply_pkg_mods()) {
-		warn(`Errors collecting package data, terminating...\n`);
+		L.err("Errors collecting package data, terminating...\n");
 		_exit(1);
 	}
 
@@ -1060,7 +1067,7 @@ function show_versions(check_version_to)
 		let latest = conf.default_version;
 		versions   = keys(conf.versions);
 		push(versions, ...[ "22.03-SNAPSHOT", "23.05-SNAPSHOT"]);
-		printf("Available 'version-to' values from %s:\n  ", url.fs_conf);
+		L.log(0, "Available 'version-to' values from %s:\n  ", url.fs_conf);
 	}
 	else {
 		// This is more appropriate, in that it drops the still-available
@@ -1073,20 +1080,20 @@ function show_versions(check_version_to)
 		for (let branch, data in branches) {
 			push(versions, ...data.versions);
 		}
-		printf("Available 'version-to' values from %s:\n  ", url.overview);
+		L.log(0, "Available 'version-to' values from %s:\n  ", url.overview);
 	}
 
 	versions = sort(versions, version_cmp);
-	print(join("\n  ", versions), "\n");
+	L.log(0, "%s\n", join("\n  ", versions));
 
 	if (check_version_to) {
 		let version = build.to.version;
 		if (version in versions)
-			printf("\nYour version-to '%s' appears valid, so either:\n" +
+			L.log(0, "\nYour version-to '%s' appears valid, so either:\n" +
 			       "  1) This build has been removed from the server, or\n" +
 			       "  2) The ASU server is having issues.\n", version);
 		else
-			printf("\nYour specified version-to '%s' is invalid.  " +
+			L.log(0, "\nYour specified version-to '%s' is invalid.  " +
 			       "Pick one from above.\n", version);
 	}
 }
@@ -1284,18 +1291,16 @@ function collect_all()
 function dump()
 {
 	// Send forth a json representation of all the stuff we've collected.
-	printf('{\n');
-	printf('"options": %.4J,\n', options);
-	printf('"url": %.4J,\n', sort(url));
-	printf('"tmp": %.4J,\n', sort(tmp));
-	printf('"build": %.4J,\n', build);
-	printf('"device": %.4J,\n', device);
-	printf('"release": %.4J,\n', release);
-	if (options.verbosity > 0) {
-		printf('"packages": %.4J,\n', packages);
-		printf('"packageDB": %.4J,\n', packageDB);
-	}
-	printf('}\n');
+	L.log(0, '{\n');
+	L.log(0, '"options": %.4J,\n', options);
+	L.log(0, '"url": %.4J,\n', sort(url));
+	L.log(0, '"tmp": %.4J,\n', sort(tmp));
+	L.log(0, '"build": %.4J,\n', build);
+	L.log(0, '"device": %.4J,\n', device);
+	L.log(0, '"release": %.4J,\n', release);
+	L.log(1, '"packages": %.4J,\n', packages);
+	L.log(1, '"packageDB": %.4J,\n', packageDB);
+	L.log(0, '}\n');
 }
 
 function list()
@@ -1306,29 +1311,29 @@ function list()
 			packages = top_level(SrcType.USER_ONLY);
 			let ctype = "y"; // "y" to install, "m" just build package.
 			for (let pkg in packages) {
-				printf("CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
+				L.log(0, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
 			}
 			break;
 
 		case "fs-all":
 			packages = top_level(SrcType.ALL);
-			printf("%s\n", join(" ", packages));
+			L.log(0, "%s\n", join(" ", packages));
 			break;
 
 		case "fs-user":
 		default:
 			packages = top_level(SrcType.USER_ONLY);
 			push(packages, ...map(replaced(packages), function(x) { return "-"+x }));
-			printf("%s\n", join(" ", packages));
+			L.log(0, "%s\n", join(" ", packages));
 			break;
 	}
 }
 
 function show_config()
 {
-	// Pretty print the major configuration values.
-	let downgrade = build.to.is_downgrade_from(build.from) ? colorize(" DOWNGRADE", Color.RED) : "";
-	print(
+	// Pretty-print the major configuration values.
+	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
+	L.log(0, 
 		`Board-name     ${device.platform}\n`
 		`Target         ${device.target}\n`
 		`Root-FS-type   ${device.fstype}\n`
@@ -1342,11 +1347,11 @@ function show_config()
 		`Image-file     ${build.to.img_file}\n`
 		`Image-URL      ${url.download}/${build.to.img_file}\n`
 	);
-	printf("Installed      %3d packages\n", length(packageDB));
-	printf("Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
-	printf("Default        %3d packages\n", length(packages.default));
-	printf("User-installed %3d packages (top-level only)\n", length(top_level(SrcType.USER_ONLY)));
-	print("\n");
+	L.log(0, "Installed      %3d packages\n", length(packageDB));
+	L.log(0, "Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
+	L.log(0, "Default        %3d packages\n", length(packages.default));
+	L.log(0, "User-installed %3d packages (top-level only)\n", length(top_level(SrcType.USER_ONLY)));
+	L.log(0, "\n");
 }
 
 const ver_bits = regexp('[^a-z0-9]', 'i');
@@ -1376,7 +1381,7 @@ function check_updates()
 {
 	let missing = 0;
 
-	printf("Package version changes:\n");
+	L.log(0, "Package version changes:\n");
 	let w0 = max(...map(keys(packageDB), length));
 	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
@@ -1393,30 +1398,30 @@ function check_updates()
 		let c2 = "";
 		if (old == null) {
 			// This happens when you '--add' a new package.
-			c1  = color(Color.YELLOW);
+			c1  = L.color(L.YELLOW);
 			old = "not-installed";
 		}
 		if (new == null) {
 			missing++;
-			c2  = color(Color.RED);
+			c2  = L.color(L.RED);
 			new = "missing to-version";
 		}
 		else {
-			c2  = color(ver_older(old, new) ? Color.GREEN : Color.YELLOW);
+			c2  = L.color(ver_older(old, new) ? L.GREEN : L.YELLOW);
 		}
-		printf(f0, pkg, c1, old, c2, new, color("reset"));
+		L.log(0, f0, pkg, c1, old, c2, new, L.color("reset"));
 	}
 
 	if (missing) {
-		printf("%d packages missing in target version, %s\n", missing, colorize("DO NOT UPGRADE!", Color.RED));
+		L.log(0, "%d packages missing in target version, %s\n", missing, L.colorize(L.RED, "DO NOT UPGRADE!"));
 	}
 	if (changes) {
-		printf("%d packages are out-of-date.\n", changes);
+		L.log(0, "%d packages are out-of-date.\n", changes);
 	}
 	else {
-		printf("  All packages are up-to-date.\n");
+		L.log(0, "  All packages are up-to-date.\n");
 	}
-	print("\n");
+	L.log(0, "\n");
 
 	return missing == 0;
 }
@@ -1434,22 +1439,22 @@ function check_defaults()
 			changes[pkg] = provider;
 		}
 		else if (! is_installed(pkg)) {
-			changes[pkg] = colorize("not-installed", Color.YELLOW);
+			changes[pkg] = L.colorize(L.YELLOW, "not-installed");
 		}
 	}
 
-	printf("Default package analysis:\n");
+	L.log(0, "Default package analysis:\n");
 	if (length(changes) == 0) {
-		printf("  No missing or modified default packages.\n\n");
+		L.log(0, "  No missing or modified default packages.\n\n");
 	}
 	else {
 		let wid = max(...map(keys(changes), function(f) { return length(f); }));
 		let fmt = `  %-${wid}s   %s\n`;
-		printf(fmt, "Default", "Provided-by");
+		L.log(0, fmt, "Default", "Provided-by");
 		for (let p, a in changes) {
-			printf(fmt, p, a);
+			L.log(0, fmt, p, a);
 		}
-		printf("\n");
+		L.log(0, "\n");
 	}
 }
 
@@ -1465,8 +1470,11 @@ function check_pkg_builds()
 	let failed = false;
 
 	let html_blob = dl_failures();
-	if (html_blob) {
-		printf("There are currently package build failures for %s %s:\n", build.to.version, device.arch);
+	if (! html_blob) {
+		L.log(0, "No package build failures found for %s %s.\n\n", build.to.version, device.arch);
+	}
+	else {
+		L.log(0, "There are currently package build failures for %s %s:\n", build.to.version, device.arch);
 
 		let info = regexp(
 			'<td class="n"><a href="[^<]*">([^<]*)</a>/</td>' +
@@ -1477,11 +1485,12 @@ function check_pkg_builds()
 
 		let feeds = map(match(html_blob, info), function(f) { return f[1]; });
 		for (let feed in feeds) {
-			printf("  Feed: %s\n", feed);
+			L.log(0, "  Feed: %s\n", feed);
 			html_blob = dl_failures(feed);
 			if (html_blob) {
 				let fails = match(html_blob, info);
 				let w0    = max(...map(fails, function(f) { return max(25, length(f[1])); }));
+				let fmt   = `    %-${w0}s  %s - %s\n`;
 
 				for (let fail in fails) {
 					let pkg  = fail[1];
@@ -1489,23 +1498,20 @@ function check_pkg_builds()
 					let msg;
 					if (is_installed(pkg)) {
 						failed = true;
-						msg = colorize("ERROR: Package installed locally, DO NOT UPGRADE!", Color.RED);
+						msg = L.colorize(L.RED, "Package installed locally, DO NOT UPGRADE!");
 					}
 					else {
 						msg = "Package not installed locally";
 					}
-					printf(`    %-${w0}s  %s - %s\n`, pkg, date, msg);
+					L.log(0, fmt, pkg, date, msg);
 				}
 			}
 		}
 
-		if (failed) {
-			printf("%s", colorize("NOTE THE ERRORS ABOVE:", Color.RED));
-		}
-		else {
-			printf("%s", colorize("Failures don't affect this device,", Color.GREEN));
-		}
-		printf(" details at\n  %s\n\n", url.failed);
+		let prefix = failed ?
+			L.colorize(L.RED,   "NOTE THE ERRORS ABOVE:") :
+			L.colorize(L.GREEN, "Failures don't affect this device,");
+		L.log(0, "%s details at\n  %s\n\n", prefix, url.failed);
 	}
 
 	return ! failed;
@@ -1611,6 +1617,8 @@ function blob(report)
 	// False is the safer option, so that's our default value.
 	let contains_defaults = true;
 
+	let log_level = report ? 0 : 1;
+
 	let build_list = top_level(SrcType.ALL); // should be '! contains_defaults' - but not really...
 	for (let pkg in packages.default) {
 		let p = what_provides(pkg);
@@ -1624,21 +1632,21 @@ function blob(report)
 		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
 		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
-			warn(`ERROR: init script file '${options.init_script}' does not exist\n`);
+			L.err("init script file '%s' does not exist\n", options.init_script);
 			return null;
 		}
 		else {
 			init_script = inits_file.read("all");
 			inits_file.close();
 			if (length(init_script) > inits_maxlen) {
-				warn(`ERROR: '${options.init_script}' is over the ${inits_maxlen} byte maximum\n`);
+				L.err("'%s' is over the %s byte maximum\n", options.init_script, inits_maxlen);
 				return null;
 			}
 		}
 	}
 
-	if (build.to.fstype != device.fstype && (options.verbosity > 0 || report)) {
-		printf("Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
+	if (build.to.fstype != device.fstype) {
+		L.log(log_level, "Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
 
 	let blob = {
@@ -1656,16 +1664,12 @@ function blob(report)
 
 	if (options.rootfs_size) {
 		blob.rootfs_size_mb = options.rootfs_size;
-		if (options.verbosity > 0 || report) {
-			printf("Build: ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
-		}
+		L.log(log_level, "Build: ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
 	}
 
 	if (init_script) {
 		blob.defaults = init_script;
-		if (options.verbosity > 0 || report) {
-			printf("Build: Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
-		}
+		L.log(log_level, "Build: Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 	}
 
 	return blob;
@@ -1673,7 +1677,7 @@ function blob(report)
 
 function json_blob()
 {
-	let b = blob();
+	let b = blob(true);
 	return b ? sprintf("%J", b) : null;
 }
 
@@ -1681,7 +1685,7 @@ function show_blob()
 {
 	let b = blob();
 	if (b) {
-		printf("%.4J\n", b);
+		L.log(0, "%.4J\n", b);
 	}
 }
 
@@ -1705,23 +1709,23 @@ function verify_image()
 	let image = options.image;
 
 	if (! fs.access(image)) {
-		warn(`ERROR: image file '${image}' does not exist\n`);
+		L.err("image file '%s' does not exist\n", image);
 		return false;
 	}
 
 	let info = fs.stat(image);
-	printf("Verifying: %s (%d bytes) against %s\n", image, info.size, tmp.firmware_sums);
+	L.log(0, "Verifying   : %s (%d bytes) against %s\n", image, info.size, tmp.firmware_sums);
 
 	let result = sha256.verify();
 	if (result?.code == 0) {
-		printf("  Saved sha256 matches\n");
+		L.log(0, "  Saved sha256 matches\n");
 	}
 	else {
 		let file_sha = sha256.sum(image);
 		let expected = sha256.saved_sum();
-		warn(`  ERROR: sha256 doesn't match:\n`
-		     `    calculated '${file_sha}'\n`
-		     `    saved      '${expected}'\n`);
+		L.err(`sha256 doesn't match:\n`
+		    `    calculated '${file_sha}'\n`
+		    `    saved      '${expected}'\n`);
 		if (! options.keep) {
 			fs.unlink(image);
 		}
@@ -1730,19 +1734,19 @@ function verify_image()
 
 	result = sysupgrade(image, ["--test"]);
 	if (result?.code == 0) {
-		printf("  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
+		L.log(0, "  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
 	}
 	else {
-		warn("ERROR: sysupgrade validation failed:\n");
-		if (result.stdout) printf("stdout =\n%s\n", result.stdout);
-		if (result.stderr) printf("stderr =\n%s\n", result.stderr);
+		L.err("sysupgrade validation failed:\n");
+		if (result.stdout) L.log(0, "stdout =\n%s\n", result.stdout);
+		if (result.stderr) L.log(0, "stderr =\n%s\n", result.stderr);
 		if (! options.keep) {
 			fs.unlink(image);
 		}
 		return false;
 	}
 
-	printf("Checks complete, image is valid.\n");
+	L.log(0, "Checks complete, image is valid.\n");
 	return true;
 }
 
@@ -1762,11 +1766,11 @@ function download()
 
 	let start    = time();
 	let response = dl_build(blob);
-	printf("\nRequesting build ----------------------\n");
+	L.log(0, "\nRequesting build ----------------------\n");
 
 	let hash = response?.request_hash;
 	if (hash) {
-		printf("Hash:   %s\n", hash);
+		L.log(0, "Hash:   %s\n", hash);
 		url.build_status = `${url.build}/${hash}`;
 	}
 
@@ -1774,48 +1778,43 @@ function download()
 	while (response) {
 		let status = response.status;
 
-		printf("Status: %d\n", status);
-		printf("Detail: %s", substr(response.detail, 0, 6) == "Error:" ? colorize(response.detail, Color.RED) : response.detail);
+		L.log(0, "Status: %d\n", status);
+		L.log(0, "Detail: %s", substr(response.detail, 0, 6) == "Error:" ? L.colorize(L.RED, response.detail) : response.detail);
 		switch (response.detail) {
 			case "queued":
-				printf(" - %d ahead of you", response.queue_position);
+				L.log(0, " - %d ahead of you", response.queue_position);
 				break;
 			case "started":
-				printf(" - %s", response.imagebuilder_status ?? "setup");
+				L.log(0, " - %s", response.imagebuilder_status ?? "setup");
 				break;
 			default:
 				break;
 		}
-		printf("\n");
+		L.log(0, "\n");
 
 		switch (status) {
 			case 202: // Build in-progress, check in after 10 seconds.
 				sleep(10000);
 				queries++;
-				printf("\nProgress %3d (%4ds) -----------------------------\n", queries, time()-start);
+				L.log(0, "\nProgress %3d (%4ds) -----------------------------\n", queries, time()-start);
 				response = dl_build_status();
 				break;
 
 			case 200: // All done.
-				printf("Build completed in %d seconds.\n", time()-start);
-				if (options.verbosity > 0) {
-					printf("build_at       = %s\n",   response.build_at);
-					printf("version_number = %s\n",   response.version_number);
-					printf("version_code   = %s\n",   response.version_code);
-					printf("rootfs_size_mb = %s\n",   response.request.rootfs_size_mb || "default");
-				}
-				if (options.verbosity > 1) {
-					printf("images = %.4J\n", response.images);
-				}
-				if (options.verbosity > 2) {
-					printf("build_cmd = %.4J\n", response.build_cmd);
-					printf("manifest = %.4J\n", response.manifest);
-				}
-				print("\n");
+				L.log(0, "\nBuild completed in %d seconds.\n", time()-start);
+				L.log(1, "  build_at       = %s\n", response.build_at);
+				L.log(1, "  version_number = %s\n", response.version_number);
+				L.log(1, "  version_code   = %s\n", response.version_code);
+				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb || "default");
+				L.log(0, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
+				L.log(2, "  images = %.4J\n",       response.images);
+				L.log(3, "  build_cmd = %.4J\n",    response.build_cmd);
+				L.log(3, "  manifest = %.4J\n",     response.manifest);
+				L.log(0, "\n");
 
 				let image = select_image(response.images);
 				if (! image) {
-					warn(`Could not locate an image for ${build.to.fstype} and ${device.sutype}...\n`);
+					L.err("Could not locate an image for '%s' and '%s'...\n", build.to.fstype, device.sutype);
 					return false;
 				}
 
@@ -1825,9 +1824,10 @@ function download()
 				let img = `${bin}/${image.name}`;
 				let dst = options.image;
 
-				printf("Image: %s\n", img);
+				L.log(0, "Image source: %s\n", img);
+				L.log(0, "Image saved : %s\n", dst);
 
-				let msg = `ERROR: Couldn't download image ${image.name}`;
+				let msg = `couldn't download image ${image.name}`;
 				let rsp = _request(img, dst, msg);
 				if (rsp?.status != 200) {
 					// need more output here, if 404 or whatever
@@ -1838,7 +1838,7 @@ function download()
 				if (manifest) {
 					manifest.write(sprintf("%.4J\n", response.manifest));
 					manifest.close();
-					printf("Manifest: %s\n", tmp.firmware_man);
+					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
 				}
 
 				sha256.save(sha);
@@ -1850,10 +1850,10 @@ function download()
 			case 422: // Unknown package.
 			case 500: // Invalid build request.
 			default:  // ???
-				if (response.error ) printf("error  =\n%s\n", response.error);
-				if (response.stdout) printf("stdout =\n%s\n", response.stdout);
-				if (response.stderr) printf("stderr =\n%s\n", response.stderr);
-				printf("ERROR: build failed with status %s.\n", status);
+				if (response.error ) L.log(0, "error  =\n%s\n", response.error);
+				if (response.stdout) L.log(0, "stdout =\n%s\n", response.stdout);
+				if (response.stderr) L.log(0, "stderr =\n%s\n", response.stderr);
+				L.err("build failed with status %s\n", status);
 				return false;
 		}
 	}
@@ -1919,12 +1919,12 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		if (! check_updates()) {
-			warn("ERROR: update checks reveal errors, can't proceed\n");
+			L.err("update checks reveal errors, can't proceed\n");
 			break;
 		}
 		check_defaults();
 		if (! check_pkg_builds()) {
-			warn("ERROR: package build checks reveal errors, can't proceed\n");
+			L.err("package build checks reveal errors, can't proceed\n");
 			break;
 		}
 		if (download() && options.command == "upgrade") {
@@ -1952,7 +1952,7 @@ switch (options.command) {
 		break;
 
 	default:
-		warn(`'${options.command}' not implemented yet.\n`);
+		L.err("'%s' not implemented yet.\n", options.command);
 		break;
 }
 
