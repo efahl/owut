@@ -114,8 +114,9 @@ let arg_defs = proto([
 	ap.DEFAULT_VERSION,
 	{ name: "command",     position: 0, one_of: commands,      action: "store",                               help: "Sub-command to execute" },
 	{ name: "version",     short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
-	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
+	{ name: "force",                    long: "--force",       action: "set",                 default: false, help: "Force download when there are no changes detected." },
 	{ name: "add",         short: "-a", long: "--add",         action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
 	{ name: "remove",      short: "-r", long: "--remove",      action: "store",     nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
@@ -1379,13 +1380,18 @@ function ver_older(v1, v2)
 
 function check_updates()
 {
+	// Scan the old and new package lists, return the number of changed
+	// packages and the number of missing packages that would cause a
+	// build failure.
+
+	let changes = 0;
 	let missing = 0;
 
 	L.log(0, "Package version changes:\n");
 	let w0 = max(...map(keys(packageDB), length));
 	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
-	let changes = 0, new = '';
+	let new = '';
 	for (let pkg, data in packageDB) {
 		if (pkg in [ "kernel", "libc" ]) continue;
 
@@ -1423,7 +1429,10 @@ function check_updates()
 	}
 	L.log(0, "\n");
 
-	return missing == 0;
+	return {
+		missing: missing,
+		changes: changes,
+	};
 }
 
 function check_defaults()
@@ -1918,7 +1927,8 @@ switch (options.command) {
 	case "upgrade":
 		collect_all();
 		show_config();
-		if (! check_updates()) {
+		let updates = check_updates();
+		if (updates.missing) {
 			L.err("update checks reveal errors, can't proceed\n");
 			break;
 		}
@@ -1926,6 +1936,14 @@ switch (options.command) {
 		if (! check_pkg_builds()) {
 			L.err("package build checks reveal errors, can't proceed\n");
 			break;
+		}
+		if (updates.changes == 0) {
+			if (options.force)
+				L.wrn("Forcing build with no changes.\n");
+			else {
+				L.log(0, "There are no changes to %s.\n", options.command);
+				break;
+			}
 		}
 		if (download() && options.command == "upgrade") {
 			install();
