@@ -27,8 +27,7 @@
 //   exclude old - needs major rework...
 //------------------------------------------------------------------------------
 
-let VERSION = "%%VERSION%%";  // Modified at packaging time by build script, see Makefile.
-if (VERSION == "%%VER"+"SION%%") VERSION = "24.0.0";
+let VERSION = "%%VERSION%%";
 
 // There's no ubus module doc yet, so dig through
 // https://github.com/jow-/ucode/blob/master/lib/ubus.c#L1973
@@ -1145,7 +1144,6 @@ function collect_device_info()
 		ver_to = conf.default_version;
 	}
 
-	// BUG sutype = "sdcard" for ??????????
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
 	if (match(target, /x86\//)) {  // This might be wrong, what about x86/geode - geos?
@@ -1153,6 +1151,10 @@ function collect_device_info()
 		sutype   = "combined";
 	}
 	else {
+		// Could be that sutype = "sdcard" for some devices, but
+		// assume it is "sysupgrade", which might be wrong.  We'll
+		// fix this after we get the profiles for the device, see
+		// 'collect_all'.
 		platform = replace(platform, /,/, "_");
 		sutype   = "sysupgrade";
 	}
@@ -1263,10 +1265,19 @@ function collect_all()
 	}
 	build.to.kver = ver;
 
+	// Here is where we fix our guess for 'sutype' made above in
+	// 'collect_device_info' (look for "sdcard" there).
 	for (let img in prof.images) {
-		if (img.type == device.sutype && img.filesystem == build.to.fstype) {
-			build.to.img_file = img.name;
-			break;
+		if (img.filesystem == build.to.fstype) {
+			if (img.type == device.sutype) {
+				build.to.img_file = img.name;
+				break;
+			}
+			if (device.sutype == "sysupgrade" && img.type == "sdcard") {
+				device.sutype = "sdcard";
+				build.to.img_file = img.name;
+				break;
+			}
 		}
 	}
 
