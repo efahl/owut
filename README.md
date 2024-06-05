@@ -19,25 +19,25 @@ opkg install ucode-mod-uclient ucode-mod-uloop
 
 [ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
 wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
-wget -O /usr/sbin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
-chmod +x /usr/sbin/owut
+wget -O /usr/bin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
+chmod +x /usr/bin/owut
 
 # Keep it installed across upgrades.
 echo '/usr/share/ucode/utils/argparse.uc' >> /etc/sysupgrade.conf
-echo '/usr/sbin/owut' >> /etc/sysupgrade.conf
+echo '/usr/bin/owut' >> /etc/sysupgrade.conf
 ```
 
 ## Usage
 
 ```
 $ owut --help
-owut - OpenWrt Upgrade Tool version 24.0.0 (/usr/sbin/owut)
+owut - OpenWrt Upgrade Tool version 2024.06.04-r1 (/usr/bin/owut)
 
 owut is an upgrade tool for OpenWrt.
 
-Usage: owut COMMAND [-V VERSION] [-k] [-v] [-a ADD] [-r REMOVE] [-I INIT_SCRIPT] [-F FSTYPE] [-S ROOTFS_SIZE] [-i IMAGE]
-  -h/--help       - Show this message and quit.
-  --version       - Show the program version and terminate.
+Usage: owut COMMAND [-V VERSION] [-v] [-k] [--force] [-a ADD] [-r REMOVE] [-I INIT_SCRIPT] [-F FSTYPE] [-S ROOTFS_SIZE] [-i IMAGE] [-f FORMAT]
+  -h/--help            - Show this message and quit.
+  --version            - Show the program version and terminate.
 
   COMMAND - Sub-command to execute, must be one of:
     check    - Collect all resources and report stats.
@@ -51,15 +51,16 @@ Usage: owut COMMAND [-V VERSION] [-k] [-v] [-a ADD] [-r REMOVE] [-I INIT_SCRIPT]
     dump     - Collect all resources and dump internal data structures.
 
   -V/--version-to VERSION - Specify the target version, defaults to installed version.
-  -k/--keep       - Save all downloaded working files.
-  -v/--verbose    - Print various diagnostics.  Repeat for even more output.
-  -a/--add ADD    - Comma-separated list of new packages to add to build list.
-  -r/--remove REMOVE - Comma-separated list of installed packages to remove from build list.
+  -v/--verbose         - Print various diagnostics.  Repeat for even more output.
+  -k/--keep            - Save all downloaded working files.
+  --force              - Force download when there are no changes detected.
+  -a/--add ADD         - Comma-separated list of new packages to add to build list.
+  -r/--remove REMOVE   - Comma-separated list of installed packages to remove from build list.
   -I/--init-script INIT_SCRIPT - Path to uci-defaults script to run on first boot ('-' use stdin).
-  -F/--fstype FSTYPE - Desired root file system type (squashfs, ext4, ubifs, jffs2).
-  -S/--rootfs-size ROOTFS_SIZE - Root file system size in MB.
-  -i/--image IMAGE - Image name for download, verify, install and upgrade.
-
+  -F/--fstype FSTYPE   - Desired root file system type (squashfs, ext4, ubifs, jffs2).
+  -S/--rootfs-size ROOTFS_SIZE - Root file system size in MB (1-1024).
+  -i/--image IMAGE     - Image name for download, verify, install and upgrade.
+  -f/--format FORMAT   - Format for 'list' output (fs-user, fs-all, config).
 
 $ owut check
 Board-name     generic
