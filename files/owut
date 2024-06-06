@@ -4,28 +4,6 @@
 // SPDX-License-Identifier: GPL-2.0-only
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
-// TODO
-// Makefile
-// See
-//    openwrt/openwrt/package/network/config/firewall4/Makefile
-//    openwrt/packages/utils/auc/Makefile
-// When you create a Makefile, this version depends on
-//    'ucode'
-//    'ucode-mod-fs'
-//    'ucode-mod-ubus'
-//    'ucode-mod-uci'
-//    'ucode-mod-uclient'
-//    'ucode-mod-uloop'
-//    'attendedsysupgrade-common'
-//    'busybox sha256sum' for checksum calculation
-//    'sysupgrade' for all that stuff
-//
-// dig through auc ssl_ctx setup and fix uc.ssl_init
-//
-// finish up options to
-//   include new - still needs to do closure on dependencies
-//   exclude old - needs major rework...
-//------------------------------------------------------------------------------
 
 let VERSION = "%%VERSION%%";
 
@@ -142,7 +120,6 @@ let url;      // See initialize_urls
 let build;    // See collect_all for next three
 let device; 
 let release;
-let package_changes; // See apply_pkg_mods
 
 
 // Temporary and resource files.
@@ -170,12 +147,17 @@ let tmp = {
 };
 
 
-let packageDB = {};  // Dictionary mirroring opkg data.
-let packageList;     // Dictionary of package name and version that are available for installation.
+let packageDB = {};      // Dictionary of installed packages and much status.
 
 let packages = {  // Dictionary of package lists.
-	installed: [],
-	default:   [],
+	// Collected from this device.
+	installed: {}, // All the name:version pairs.
+	top_level: [], // Simple list of names.
+
+	// Collected from upgrade servers based on to-version.
+	default:   [], // Another simple name list.
+        available: {}, // The name:version pairs that are available for installation.
+	changes:   {}, // Changes extracted from overview; structure documented in apply_pkg_mods.
 };
 
 //------------------------------------------------------------------------------
@@ -484,87 +466,9 @@ function dl_build_status()
 //------------------------------------------------------------------------------
 //-- Package management --------------------------------------------------------
 
-function canonical_name(pkg)
+function is_installed(pkg)
 {
-	// Scan the package database for a matching ABI-versioned name, and if
-	// it exists, return the unversioned name for the package.
-	for (let pkg_name, data in packageDB) {
-		if (pkg == data?.versioned) {
-			return pkg_name;
-		}
-	}
-	return pkg;
-}
-
-function what_provides(pkg, return_self)
-{
-	// If a package doesn't appear directly in the installed packages, look
-	// and see if the abstract package name is aliased to an actual package.
-	// vim -> vim-full  or  tc -> tc-tiny
-
-	// ??? can this possibly return more than one value (like 'provides_what'
-	// does)?  I don't think it can, unless the package  database is screwed
-	// up somehow.
-	// Oho, see 'wget' - provided by both 'uclient-fetch' and 'wget-ssl'
-
-	for (let pkg_name, data in packageDB) {
-		if (pkg in data.provides) {
-			return pkg_name;
-		}
-		if (pkg == data?.versioned) {
-			// In case we're provided an ABI-versioned one.
-			return pkg_name;
-		}
-	}
-	return return_self ? pkg : null;
-}
-
-function provides_what(pkg)
-{
-	// Inverse of above.  Given a versioned or variant package, find out what
-	// its base package is named.
-	// vim-full -> vim  or  libjson-script202312041 -> libjson-script
-
-	return packageDB[pkg]?.provides;
-}
-
-function depends_what(pkg)
-{
-	// Given a package, return the list of packages it depends upon, i.e., those
-	// packages that will be installed implicitly by 'opkg' dependency checking.
-
-	return packageDB[pkg]?.depends;
-}
-
-function what_depends(pkg)
-{
-	// Given a package, return the list of packages that depend on it.  If the
-	// result is empty, this is a top-level package that must be explicitly
-	// installed.
-	//
-	// We must use all of the aliases for a package, as the various package
-	// 'depends' will contain non-specific names: 'tc' might be from
-	// 'tc-tiny', or 'iptables' from 'iptables-nft'.
-
-	pkg = what_provides(pkg, true);
-	let aliases = [ pkg ];
-	if (packageDB[pkg]?.versioned) {
-		push(aliases, packageDB[pkg].versioned);
-	}
-	let alternates = provides_what(pkg);
-	if (alternates) {
-		push(aliases, ...alternates);
-	}
-
-	let result = [];
-	for (let alias in aliases) {
-		for (let pkg_name, data in packageDB) {
-			if (alias in data.depends) {
-				push(result, pkg_name);
-			}
-		}
-	}
-	return length(result) ? result : null;
+	return pkg in packageDB;
 }
 
 function is_default(pkg)
@@ -572,121 +476,59 @@ function is_default(pkg)
 	// Return status if package is in the defaults for this device, i.e., it
 	// will be present as part of the standard install.
 
+	// Don't attempt to do the following, because we care about things that
+	// may not be installed, e.g., 'dnsmasq' replaced by 'dnsmasq-full'.
+	//   return pkg in packageDB && packageDB[pkg].default;
+
 	return pkg in packages.default;
 }
 
-function is_installed(pkg)
+function is_top_level(pkg)
 {
-	// Return status if package is installed on this device.
-	//
-	// Do not look in what-provides to see if we should translate there.
-	// That causes issues for things like dnsmasq-full which provides dnsmasq,
-	// so a call to is_installed('dnsmasq') says yes, when it should say no.
-	//
-	// Maybe add an 'is_provided' for those who need it, distinct from the
-	// actual package installed that provides it.
-
-	pkg = canonical_name(pkg);
-	return pkg in packageDB;
+	// We only check in the installed packages.
+	return is_installed(pkg) && packageDB[pkg].top_level;
 }
 
-function is_essential(pkg)
-{
-	// Marked as "essential" in the package manager's database, so never delete it.
-	pkg = canonical_name(pkg);
-	return packageDB[pkg]?.essential;
-}
-
-function in_package_lists(pkg)
+function is_available(pkg)
 {
 	// Search for a given package in the combined platform/arch package list.
-	pkg = canonical_name(pkg);
-	return pkg in packageList;
+	return pkg in packages.available;
 }
 
 function add_package(pkg)
 {
-	pkg = canonical_name(pkg);
 	if (is_installed(pkg)) {
 		return true;
 	}
-	if (! in_package_lists(pkg)) {
+	if (! is_available(pkg)) {
 		L.err("package '%s' is not available on this platform\n", pkg);
 		return false;
 	}
 
-// TODO collect all of abi_version versioned depends provides conflicts etc...
-// TODO check for conflicts and error out
-// TODO recursively add all dependencies
 	packageDB[pkg] = {
 		version:     null,
-		new_version: packageList[pkg],
+		new_version: packages.available[pkg],
+		top_level:   true,
+		default:     is_default(pkg),
 	};
 	return true;
 }
 
-function remove_package(pkg, due_to)
+function remove_package(pkg)
 {
-	// pkg    - the package to remove, if possible.
-	// due_to - the depending, parent package this is being removed causing
-	//          'pkg' to be removed.  Non-null indicates recursive closure.
+	// pkg - the package to remove, if possible.
 
-	pkg = canonical_name(pkg);
-
-	if (is_essential(pkg)) {
-		// Don't waste time on things like 'libc'.
-		// TODO see if there are others, like 'kernel', 'base-files' and such...
-		if (due_to == null) {
-			// User specified this explicitly, so tell them.
-			L.err("package '%s' cannot be removed because it is essential\n", pkg);
+	if (is_installed(pkg)) {
+		if (! is_top_level(pkg)) {
+			L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
 		}
-		return false; 
-	}
-
-	if (due_to != null && is_default(pkg)) {
-		L.wrn("dependency '%s' will not be removed, you must do so explicitly\n", pkg);
-		return false;
-	}
-
-	if (! is_installed(pkg)) {
-		let msg = `package '${pkg}' cannot be removed because it is not installed`;
-		if (! in_package_lists(pkg)) {
-			msg += ".  Did you misspell the package name?";
+		else if (is_default(pkg)) {
+			L.wrn("package '%s' is a default package, removal may have unknown side effects\n", pkg);
 		}
-		L.wrn("%s\n", msg);
-		return false;
+		delete packageDB[pkg];
+		return true;
 	}
-
-	let refs = what_depends(pkg);
-	L.log(2, "INFO: '%s' refs = %s\n", pkg, substr(refs + "", 0, 50));
-	if (due_to in refs && length(refs) == 1) {
-		// Must be the only thing in refs, otherwise we can't remove it.
-		refs = filter(refs, function(p) { return p != due_to; });
-	}
-	if (length(refs) > 0) {
-		if (due_to == null)
-			L.err("'%s' cannot be removed due to %d dependents\n", pkg, length(refs));
-		else
-			L.log(2, "INFO: '%s' can't be removed, used by '%s'\n", pkg, substr(refs + "", 0, 50));
-		return false;
-	}
-
-	let deps = depends_what(pkg);  // The packages that should also be removed.
-	for (let dep in deps) {
-		// Dependencies are already in canonical form, but may be an
-		// alias for some variant.  'dnsmasq' might be satisfied by any
-		// of dnsmasq, dnsmasq-full or dnsmasq-dhcpv6.
-		dep = what_provides(dep, true);
-		if (is_essential(dep)) continue;
-
-		L.log(2, "INFO: attempt to remove '%s' dependency '%s'\n", pkg, dep);
-		remove_package(dep, pkg);
-	}
-
-	L.log(1, "INFO: '%s' removed %s\n", pkg, due_to ? `due to '${due_to}'` : "by user");
-
-	delete packageDB[pkg];  // NO this is completely wrong, just set to-ver to null or something...
-	return true;
+	return false;
 }
 
 function replace_package(old_pkg, new_pkg)
@@ -703,6 +545,17 @@ function replace_package(old_pkg, new_pkg)
 
 //------------------------------------------------------------------------------
 
+function collect_defaults(board, device)
+{
+	// Use both board json for its defaults, then add the device-specific
+	// defaults to make one big defaults list.
+
+	packages.default = ["kernel"];
+	push(packages.default, ...board);
+	push(packages.default, ...device);
+	packages.default = sort(packages.default);
+}
+
 function apply_pkg_mods()
 {
 	// 1) Handle 'overview.package_changes'.
@@ -710,7 +563,7 @@ function apply_pkg_mods()
 	// 3) Apply user-specified additions.
 	//
 	// Package names in changes are already in canonical form.
-	// package_changes = [
+	// changes = [
 	//   {
 	//     source:    "name-from",  // Required string - name of package in target version
 	//     target:    "name-to",    // Optional string - if present, name of replaced package in installed version
@@ -723,13 +576,13 @@ function apply_pkg_mods()
 	// For a case of simple removal, see 'kmod-nft-nat6', which was merged
 	// into 'kmod-nft-nat' in rev 19160.
 
-	let errors      = 0;
-	let overview    = dl_overview();
-	package_changes = overview.branches[release.branch]?.package_changes;
+	let errors       = 0;
+	let overview     = dl_overview();
+	packages.changes = overview.branches[release.branch]?.package_changes;
 
 	// TODO think about downgrades, i.e., when to.rev_num < from.rev_num...
 	let rev_num = build.to.rev_num();
-	for (let chg in package_changes) {
+	for (let chg in packages.changes) {
 		if (chg.revision <= rev_num) {
 			if (chg.target) {
 				if (! replace_package(chg.source, chg.target)) {
@@ -762,140 +615,38 @@ function apply_pkg_mods()
 
 function collect_packages()
 {
-	// When we move to Alpine apk, see
-	//   https://wiki.alpinelinux.org/wiki/Apk_spec
-	//
-	// Using data from opkg status, build an object containing all installed
-	// package dependencies.
+	// Using data from rpc-sys packagelist, build an object containing all
+	// installed package data.
 	//
 	//     packageDB = {
 	//         "pkg1": {
-	//             abi_version: "2023",
-	//             versioned:   "package-name2023",
 	//             version:     "version-string",
 	//             new_version: "version-string",
-	//             essential:   boolean,
-	//             depends:     [ "deps", ... ],
-	//             provides:    [ "prvs", ... ],
-	//             conflicts:   [ "cons", ... ]
-	// candidates?
-	// default: false, missing: false, keep?: true, more???
-	//
+	//             top_level:   bool,
+	//             default:     bool,
 	//         },
 	//         "pkg2": {
 	//             ...
 	//         },
 	//     };
-	//
-	// such that
-	//     pkg = an installed package
-	//     dep = all dependencies; actual 'pkg' name, see NOTE
-	//     prv = alternate names for this package
-	//     con = packages conflicting with this one
-	//
-	// NOTE: We process the dependency list to contain only canonical 'pkg'
-	// names, by scanning the 'provides' lists and replacing aliases.
-	//
-	// Consider moving 'versioned' into 'provides'.  That would cleanup the
-	// 'what_*' functions, is there any need to have it stand separate?
-	//
-	// It appears that the 'conflicts' are not in canonical form, but we
-	// can't pre-process them because
-	//   vim-full conflicts vim, provided by vim-full but we want vim
-	// but
-	//   opkg -A info libustream-mbedtls20201210
-	// shows non-canonical conflicts values
-	// This is because some packages, like vim or dnsmasq, have variant
-	// packaging where the base package defines the capability.  For things
-	// like libustream-xxx, there is no base capability, just higher-level
-	// packages built to depend on the specific conflicting variants.
-	// See 'opkg -A info libustream-mbedtls20201210' for an example.
-	//
-	// Then there are weird non-conflicting packages, like tc-tiny, tc-full
-	// and tc-bpf, which all purport to provide 'tc', but don't list conflicts.
 
-	let line;
-	let pkg  = null;
-	let save = false;
-	let data = null;
-	let list = null;
-	let m    = null;
+	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
+	packages.installed = sort(installed.packages);
 
-	let opkg_status = fs.open("/usr/lib/opkg/status", "r");
-	while (line = opkg_status.read("line")) {
-		line = trim(line);
+	let top_level = ubus.call("rpc-sys", "packagelist", { "all": false });
+	delete top_level.packages["kernel"]; // Not sure how they get here...
+	delete top_level.packages["libc"];
+	packages.top_level = sort(keys(top_level.packages));
 
-		if (m = match(line, /^Package: (.*)$/)) {
-			if (save && pkg && data) {
-				// 'pkg' is NOT ABI-versioned here.
-				packageDB[pkg] = data;
-			}
-			pkg  = m[1]; // Could be ABI-versioned at this point.
-			save = true;
-			data = {};
-		}
-		else if (m = match(line, /^ABIVersion: (.*)$/)) {
-			// Remove ABI version, see
-			//    https://github.com/openwrt/rpcd/blob/master/sys.c#L231
-			let ver = m[1];
+	packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
 
-			data.abi_version = ver;
-			data.versioned   = pkg;
-			pkg = substr(pkg, 0, -length(ver)); // Only after saving original in 'versioned'.
-		}
-		else if (match(line, /^Status:.*not-installed/)) {
-			save = false;
-		}
-		else if (m = match(line, /^Depends: (.*)/)) {
-			list = replace(m[1], /,|\([^\)]*\)/g, ""); // Remove version specs and commas.
-			data.depends = split(trim(list), / +/);
-		}
-		else if (m = match(line, /^Provides: (.*)/)) {
-			list = replace(m[1], /,|\([^\)]*\)/g, "");
-			data.provides = split(trim(list), / +/);
-		}
-		else if (m = match(line, /^Conflicts: (.*)/)) {
-			list = replace(m[1], /,|\([^\)]*\)/g, "");
-			data.conflicts = split(trim(list), / +/);
-		}
-		else if (m = match(line, /^Version: (.*)/)) {
-			data.version = m[1];
-		}
-		else if (m = match(line, /^Essential: (.*)/)) {
-			data.essential = m[1] == "yes";
-		}
-	}
-	opkg_status.close();
-
-	packageDB["kernel"].essential = true;  // Why isn't it already marked?
-
-	if (save && pkg && data) {
-		packageDB[pkg] = data;
-	}
-
-	// Once fully populated, we can fix up depend lists to contain only the
-	// canonical package names.
-	for (let pkg, data in packageDB) {
-		data.depends = map(data.depends, canonical_name);
-		if (data?.conflicts)
-			data.conflicts = map(data.conflicts, canonical_name);
-
-		if (pkg in data.provides) {
-			// Remove self from provides list.
-			let loc = index(data.provides, pkg);
-			splice(data.provides, loc, 1);
-			if (length(data.provides) == 0) {
-				delete data.provides;
-			}
-		}
-	}
-
-	packageList = dl_package_versions();
-	for (let pkg, ver in packageList) {
-		pkg = canonical_name(pkg);
-		if (pkg in packageDB) {
-			packageDB[pkg].new_version = ver;
-		}
+	for (let pkg, ver in packages.installed) {
+		packageDB[pkg] = {
+			version:     ver,
+			new_version: packages.available[pkg],
+			top_level:   pkg in packages.top_level,
+			default:     is_default(pkg),
+		};
 	}
 
 	if (! apply_pkg_mods()) {
@@ -906,30 +657,7 @@ function collect_packages()
 	packageDB = sort(packageDB);
 }
 
-function changed_defaults()
-{
-	// THESE MUST BE ADDED TO THE BUILD LIST...
-	// If we're using "diff_packages: false" in the build blob (which seems
-	// proper, given missing/changed underneath stuff).
-
-	for (let pkg in packages.default) {
-		if (what_provides(pkg)) {
-			printf("default is goofy %-15s %s\n", pkg, what_provides(pkg)); // TODO
-		}
-	}
-	return filter(
-		map(packages.default, function(pkg) { return what_provides(pkg); }),
-		length
-	);
-}
-
-function missing_defaults()
-{
-	// Return the list of default packages that are not currently installed.
-	return filter(packages.default, function(pkg) {
-		return ! (what_provides(pkg, true) in packageDB);
-	});
-}
+//------------------------------------------------------------------------------
 
 const SrcType = {
 	ALL:          0,
@@ -942,50 +670,34 @@ function top_level(src_type)
 	// Return only the installed top level packages, i.e., those upon which
 	// no other package depends.  'src_type' specifies how the top-level list
 	// is to be filtered.
-	//
-	// Note that this returns installed packages that replace the default
-	// packages, for example, 'dnsmasq-full' instead 'dnsmasq'.  This is
-	// because 'packages.default' contains non-canonical names.<WAIT this is wrong, canonical names are non-ABI-versioned, not the "what provides" names
 
 	let tl;
 	switch (src_type) {
 		case SrcType.ALL:
 			tl = function(pkg) {
-				return what_depends(pkg) == null;
+				return is_top_level(pkg);
 			};
 			break;
 
 		case SrcType.DEFAULT_ONLY:
 			tl = function(pkg) {
-				if (what_depends(pkg)) return false;
-				return is_default(pkg);
+				return is_top_level(pkg) && is_default(pkg);
 			};
 			break;
 
 		case SrcType.USER_ONLY:
 			tl = function(pkg) {
-				if (what_depends(pkg)) return false;
-				return ! is_default(pkg);
+				return is_top_level(pkg) && ! is_default(pkg);
 			};
 			break;
 	}
 	return filter(keys(packageDB), tl);
 }
 
-function replaced(packages)
+function removed_defaults()
 {
-	// Return a list of packages from the defaults that have replacements
-	// in the given list of 'packages'.
-
-	let rep = [];
-	for (let pkg in packages) {
-		for (let w in provides_what(pkg)) {
-			if (is_default(w)) {
-				push(rep, w);
-			}
-		}
-	}
-	return rep;
+	// Return the list of default packages that have been removed.
+	return filter(packages.default, function(p) { return ! is_installed(p); });
 }
 
 //------------------------------------------------------------------------------
@@ -1281,20 +993,7 @@ function collect_all()
 		}
 	}
 
-	// These lists need a lot more structure, "sver:...", "tver:...",
-	// "default:true", "missing:false" and that sort of thing.
-	packages.default = ["kernel"];
-	for (let pkg in board_json.default_packages) {
-		push(packages.default, pkg);
-	}
-	for (let pkg in prof.device_packages) {
-		push(packages.default, pkg);
-	}
-	packages.default = sort(packages.default);
-
-	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
-	packages.installed = sort(installed.packages);
-
+	collect_defaults(board_json.default_packages, prof.device_packages);
 	collect_packages();
 }
 
@@ -1335,7 +1034,7 @@ function list()
 		case "fs-user":
 		default:
 			packages = top_level(SrcType.USER_ONLY);
-			push(packages, ...map(replaced(packages), function(x) { return "-"+x }));
+			push(packages, ...map(removed_defaults(), function(x) { return "-"+x }));
 			L.log(0, "%s\n", join(" ", packages));
 			break;
 	}
@@ -1454,12 +1153,10 @@ function check_defaults()
 
 	let changes = {};
 	for (let pkg in packages.default) {
-		let provider = what_provides(pkg);
-		if (provider) {
-			changes[pkg] = provider;
-		}
-		else if (! is_installed(pkg)) {
-			changes[pkg] = L.colorize(L.YELLOW, "not-installed");
+		// Without 'what_provides' from the package manager, we can no
+		// longer tell what is replaced-by...
+		if (! is_installed(pkg)) {
+			changes[pkg] = L.colorize(L.YELLOW, "not installed, possibly replaced by another package");
 		}
 	}
 
@@ -1543,8 +1240,6 @@ function tests()
 	let def = top_level(SrcType.DEFAULT_ONLY);
 	let usr = top_level(SrcType.USER_ONLY);
 
-	print('changed defaults\n  ', join(" ", changed_defaults()), '\n');
-	print('missing defaults\n  ', join(" ", missing_defaults()), '\n');
 	printf('defaults               %d\n  %s\n', length(packages.default), join(" ", packages.default));
 	printf('all          top-level %d\n  %s\n', length(all), join(" ", all));
 	printf('default-only top-level %d\n  %s\n', length(def), join(" ", def));
@@ -1561,41 +1256,6 @@ for (let pkg in packageDB) {
 	}
 }
 
-	print('\n\n');
-	print('Now the odd ones, non-top-level defaults:\n');
-	let w = max(...map(packages.default, length));
-	let f =`  %-${w}s  %s\n`;
-	for (let pkg in packages.default) {
-		if (pkg in ["kernel", "libc"]) continue;  // Obvious ones...
-		let deps = what_depends(pkg);
-		if (deps != null) {
-			printf(f, pkg, deps);
-		}
-	}
-
-	if (false) {
-		// Allow checking for conflicts if user changes an installed package.
-		for (let pkg, data in packageDB) {
-			if (data?.conflicts) {
-				printf("Installed %-15s conflicts with %s\n", pkg, data.conflicts);
-			}
-		}
-	}
-
-	if (false) {
-		for (let pkg in packages.default) {
-			if (! (pkg in packages.depends)) {
-				printf("  in def not dep  %s\n", pkg);
-			}
-		}
-		print("\n");
-		for (let pkg in packages.depends) {
-			if (! (pkg in packages.default)) {
-				printf("  in dep not def  %s\n", pkg);
-			}
-		}
-	}
-
 	if (true) {
 		// Test a handful of packages;
 		for (let pkg in [
@@ -1605,21 +1265,8 @@ for (let pkg in packageDB) {
 			"bort",
 		]) {
 			printf("%s\n", pkg);
-			print('  depends_what  ', depends_what(pkg), '\n');
-			print('  what_depends  ', what_depends(pkg), '\n');
-			print('  provides_what ', provides_what(pkg), '\n');
-			print('  what_provides ', what_provides(pkg), '\n');
 			print('  is_default    ', is_default(pkg), '\n');
 			print('  is_installed  ', is_installed(pkg), '\n');
-		}
-	}
-
-	if (true) {
-		print("what-provides in defaults:\n");
-		for (let pkg in packages.default) {
-			if (what_provides(pkg)) {
-				printf("def renamed %s -> %s\n", pkg, what_provides(pkg));
-			}
 		}
 	}
 }
@@ -1640,12 +1287,6 @@ function blob(report)
 	let log_level = report ? 0 : 1;
 
 	let build_list = top_level(SrcType.ALL); // should be '! contains_defaults' - but not really...
-	for (let pkg in packages.default) {
-		let p = what_provides(pkg);
-		if (! (p in build_list)) {
-// TODO what's going on here?
-		}
-	}
 
 	let init_script;
 	if (options.init_script) {
