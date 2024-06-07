@@ -317,6 +317,7 @@ function read_tmp_file(file)
 	}
 	return tx;
 }
+
 function read_tmp_json(file)
 {
 	// Read 'file' into a json object, then optionally delete the file.
@@ -900,11 +901,11 @@ function collect_device_info()
 	};
 
 	device = {
-		arch:     null,                   // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in tmp.platform_json
-		target:   sysb.release.target,    // "x86/64" or "ath79/generic" or "mediatek/mt7622", from board file
-		platform: platform,               // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
-		fstype:   sysb.rootfs_type,       // "ext4" or "squashfs"
-		sutype:   sutype,                 // Sysupgrade type, combined, combined-efi or sysupgrade or ???
+		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in tmp.platform_json
+		target:   target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from board file
+		platform: platform,          // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
+		fstype:   sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
+		sutype:   sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
 	};
 }
 
@@ -977,16 +978,28 @@ function collect_all()
 	}
 	build.to.kver = ver;
 
+	let valid_fstypes = uniq(sort(map(prof.images, function(i){ return i.filesystem; })));
+	if (! (build.to.fstype in valid_fstypes)) {
+		L.err("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
+		_exit(1);
+	}
+
 	// Here is where we fix our guess for 'sutype' made above in
 	// 'collect_device_info' (look for "sdcard" there).
+	let valid_sutypes = uniq(sort(map(prof.images, function(i){ return i.type; })));
+	if (! (device.sutype in valid_sutypes)) {
+		if (device.sutype == "sysupgrade" && "sdcard" in valid_sutypes) {
+			device.sutype = "sdcard";
+		}
+		else {
+			L.err("sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
+			_exit(1);
+		}
+	}
+
 	for (let img in prof.images) {
 		if (img.filesystem == build.to.fstype) {
 			if (img.type == device.sutype) {
-				build.to.img_file = img.name;
-				break;
-			}
-			if (device.sutype == "sysupgrade" && img.type == "sdcard") {
-				device.sutype = "sdcard";
 				build.to.img_file = img.name;
 				break;
 			}
@@ -1593,7 +1606,7 @@ switch (options.command) {
 			if (options.force)
 				L.wrn("Forcing build with no changes.\n");
 			else {
-				L.log(0, "There are no changes to %s.\n", options.command);
+				L.log(0, "There are no changes to %s (see '--force').\n", options.command);
 				break;
 			}
 		}
