@@ -13,7 +13,8 @@
 // $ ucode -p 'import { ArgActions } from "utils.argparse"; keys(ArgActions);'
 
 import { cursor } from 'uci';
-import { isnan  } from 'math';
+
+const isnan = (x) => x != x;
 
 export const ArgActions = {
 // Static class of standard actions for arguments.

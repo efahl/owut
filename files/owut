@@ -16,9 +16,10 @@ const uclient = require("uclient");
 import * as fs       from "fs";
 import * as mod_ubus from "ubus";
 import * as ap       from "utils.argparse";
-import { isnan  }    from "math";
 import { cursor }    from "uci";
 let uci = cursor();
+
+const isnan = (x) => x != x;
 
 //------------------------------------------------------------------------------
 
@@ -675,21 +676,15 @@ function top_level(src_type)
 	let tl;
 	switch (src_type) {
 		case SrcType.ALL:
-			tl = function(pkg) {
-				return is_top_level(pkg);
-			};
+			tl = is_top_level;
 			break;
 
 		case SrcType.DEFAULT_ONLY:
-			tl = function(pkg) {
-				return is_top_level(pkg) && is_default(pkg);
-			};
+			tl = (pkg) => is_top_level(pkg) && is_default(pkg);
 			break;
 
 		case SrcType.USER_ONLY:
-			tl = function(pkg) {
-				return is_top_level(pkg) && ! is_default(pkg);
-			};
+			tl = (pkg) => is_top_level(pkg) && ! is_default(pkg);
 			break;
 	}
 	return filter(keys(packageDB), tl);
@@ -698,7 +693,7 @@ function top_level(src_type)
 function removed_defaults()
 {
 	// Return the list of default packages that have been removed.
-	return filter(packages.default, function(p) { return ! is_installed(p); });
+	return filter(packages.default, (p) => ! is_installed(p));
 }
 
 //------------------------------------------------------------------------------
@@ -978,7 +973,7 @@ function collect_all()
 	}
 	build.to.kver = ver;
 
-	let valid_fstypes = uniq(sort(map(prof.images, function(i){ return i.filesystem; })));
+	let valid_fstypes = uniq(sort(map(prof.images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
 		L.err("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
 		_exit(1);
@@ -986,7 +981,7 @@ function collect_all()
 
 	// Here is where we fix our guess for 'sutype' made above in
 	// 'collect_device_info' (look for "sdcard" there).
-	let valid_sutypes = uniq(sort(map(prof.images, function(i){ return i.type; })));
+	let valid_sutypes = uniq(sort(map(prof.images, (img) => img.type)));
 	if (! (device.sutype in valid_sutypes)) {
 		if (device.sutype == "sysupgrade" && "sdcard" in valid_sutypes) {
 			device.sutype = "sdcard";
@@ -1047,7 +1042,7 @@ function list()
 		case "fs-user":
 		default:
 			packages = top_level(SrcType.USER_ONLY);
-			push(packages, ...map(removed_defaults(), function(x) { return "-"+x }));
+			push(packages, ...map(removed_defaults(), (pkg) => "-"+pkg));
 			L.log(0, "%s\n", join(" ", packages));
 			break;
 	}
@@ -1112,11 +1107,11 @@ function check_updates()
 
 	L.log(0, "Package version changes:\n");
 	let w0 = max(...map(keys(packageDB), length));
-	let w1 = max(...map(values(packageDB), function(p) { return length(p.version); }));
+	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let new = '';
 	for (let pkg, data in packageDB) {
-		if (pkg in [ "kernel", "libc" ]) continue;
+		if (pkg in [ "kernel", "libc" ]) continue; // They aren't in 'available'?
 
 		let old = data.version;
 		let new = data.new_version;
@@ -1178,7 +1173,7 @@ function check_defaults()
 		L.log(0, "  No missing or modified default packages.\n\n");
 	}
 	else {
-		let wid = max(...map(keys(changes), function(f) { return length(f); }));
+		let wid = max(...map(keys(changes), (f) => length(f)));
 		let fmt = `  %-${wid}s   %s\n`;
 		L.log(0, fmt, "Default", "Provided-by");
 		for (let p, a in changes) {
@@ -1213,13 +1208,13 @@ function check_pkg_builds()
 			'g'
 		);
 
-		let feeds = map(match(html_blob, info), function(f) { return f[1]; });
+		let feeds = map(match(html_blob, info), (f) => f[1]);
 		for (let feed in feeds) {
 			L.log(0, "  Feed: %s\n", feed);
 			html_blob = dl_failures(feed);
 			if (html_blob) {
 				let fails = match(html_blob, info);
-				let w0    = max(...map(fails, function(f) { return max(25, length(f[1])); }));
+				let w0    = max(...map(fails, (f) => max(25, length(f[1])) ));
 				let fmt   = `    %-${w0}s  %s - %s\n`;
 
 				for (let fail in fails) {
