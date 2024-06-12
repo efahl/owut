@@ -19,7 +19,8 @@ import * as ap       from "utils.argparse";
 import { cursor }    from "uci";
 let uci = cursor();
 
-const isnan = (x) => x != x;
+const default_sysupgrade = "https://sysupgrade.openwrt.org";
+const default_upstream   = "https://downloads.openwrt.org";
 
 //------------------------------------------------------------------------------
 
@@ -133,8 +134,6 @@ let tmp = {
 	pkg_arch_json:      `${tmp_root}packages-arch.json`,
 	pkg_platform_json:  `${tmp_root}packages-plat.json`,
 	platform_json:      `${tmp_root}platform.json`,
-
-	fs_conf_js:         `${tmp_root}config.js`,
 
 	failed_html:        `${tmp_root}failures`,
 
@@ -324,19 +323,13 @@ function read_tmp_json(file)
 	// Read 'file' into a json object, then optionally delete the file.
 	// Primarily used to parse downloads from /tmp.
 
-	let fd = fs.open(file, "r");
-	let js = json(fd);
-	fd.close();
-	if (! options.keep) {
-		fs.unlink(file);
-	}
-	return js;
+	return json(read_tmp_file(file));
 }
 
 //------------------------------------------------------------------------------
 //-- Source-specific downloaders -----------------------------------------------
 
-function dl_board()
+function dl_platform()
 {
 	// Get the starting point for the target build.
 
@@ -365,26 +358,6 @@ function dl_overview()
 	L.log(0, "Response status: %s\n", rsp?.status);
 	L.err("%s\n", msg);
 	_exit(1);
-}
-
-function dl_fs_conf()
-{
-	// Download the overview metadata from the firmware-selector, as it
-	// has a much more liberal notion as to what builds are available.
-	//
-	// This is hacky and fragile, parsing JS into ucode, then running it.
-
-	let msg = `could not download '${url.fs_conf}', aborting.`;
-	let rsp = _request(url.fs_conf, tmp.fs_conf_js, msg);
-	if (rsp?.status != 200) {
-		L.log(0, "Response status: %s\n", rsp?.status);
-		L.err("%s\n", msg);
-		_exit(1);
-	}
-
-	let code = read_tmp_file(tmp.fs_conf_js);
-	let data = loadstring(replace(code, "var config =", "return"));
-	return data();
 }
 
 function dl_bom()
@@ -463,6 +436,74 @@ function dl_build_status()
 		return read_tmp_json(tmp.build_status_json);
 	}
 	return null;
+}
+
+//------------------------------------------------------------------------------
+
+function numstr(s) {
+	// Attempt conversion, if NaN return original string.
+	let n = int(s);
+	return n == n ? n : s;
+}
+
+const ver_bits = regexp('[^a-z0-9]', 'i');
+function pkg_ver_cmp(old, new)
+{
+	let v1 = split(lc(old), ver_bits);
+	let v2 = split(lc(new), ver_bits);
+	for (let i, n1 in v1) {
+		let n2 = v2[i];
+		if (n1 != n2) {
+			n1 = numstr(n1);
+			n2 = numstr(n2);
+			if (n1 < n2) return -1;
+			if (n1 > n2) return  1;
+		}
+	}
+	return 0;
+}
+
+function pkg_ver_older(v1, v2)
+{
+	// Is v1 and older version than v2?
+	return pkg_ver_cmp(v1, v2) < 0;
+}
+
+function version_cmp(v1, v2)
+{
+	// Compare two versions and return cmp value based on their relative
+	// ordering.  We want to make sure RCs are before any release, and
+	// SNAPSHOTs are after.
+
+	// BUG - lexical, so x.10 < x.2, blarg...
+
+	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126), so late in sort order.
+	v2 = replace(v2, '-SNAP', '.99')+'~';
+	if (v1 < v2) return -1;
+	if (v1 > v2) return  1;
+	return 0;
+}
+
+function version_older(new_version, base_version)
+{
+	// Use version_cmp to see if new_version < base_version.  Useful to detect
+	// if the user is attempting to downgrade their installation.
+	//
+	//  version_older('23.05.2', 'SNAPSHOT') -> true
+
+	return version_cmp(new_version, base_version) < 0;
+}
+
+function branch_of(version)
+{
+	// Extract and return the branch for a given version.
+	//   SNAPSHOT       -> SNAPSHOT
+	//   23.05.0-rc1    -> 23.05
+	//   23.05.3        -> 23.05
+	//   23.05-SNAPSHOT -> 23.05
+	if (version == "SNAPSHOT") return "SNAPSHOT";
+	let m = match(version, /\d+\.\d+/);
+	return m ? m[0] : "";
 }
 
 //------------------------------------------------------------------------------
@@ -578,9 +619,7 @@ function apply_pkg_mods()
 	// For a case of simple removal, see 'kmod-nft-nat6', which was merged
 	// into 'kmod-nft-nat' in rev 19160.
 
-	let errors       = 0;
-	let overview     = dl_overview();
-	packages.changes = overview.branches[release.branch]?.package_changes;
+	let errors = 0;
 
 	// TODO think about downgrades, i.e., when to.rev_num < from.rev_num...
 	let rev_num = build.to.rev_num();
@@ -700,8 +739,7 @@ function removed_defaults()
 
 function initialize_urls()
 {
-	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? "https://sysupgrade.openwrt.org";
-	let fs_root    = "https://firmware-selector.openwrt.org";
+	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? default_sysupgrade;
 
 	let api        = sysupgrade + "/api/v1";
 	let build      = api + "/build";
@@ -709,10 +747,6 @@ function initialize_urls()
 	let static     = sysupgrade + "/json/v1";
 	let store      = sysupgrade + "/store";
 	let overview   = static + "/overview.json";
-	let fs_conf    = fs_root + "/config.js";
-
-	// This should really should be in config somewhere:
-	let downloads  = "https://downloads.openwrt.org";
 
 	url = {
 		sysupgrade_root: sysupgrade, // sysupgrade server base url
@@ -726,84 +760,47 @@ function initialize_urls()
 		pkg_arch:        null,       // Generic arch package list, containing most of the items
 		pkg_plat:        null,       // Platform packages, built specifically for this platform
 
-		fs_root:         fs_root,    // Firmware-selector root.
-		fs_conf:         fs_conf,    // FS config.js
-
-		downloads_root:  downloads,  // download server base url
-		download:        null,       // with directory at which the "to" build can be found
+		upstream:        null,       // upstream build server base url, from overview.json
+		download:        null,       // upstream with directory at which the "to" build can be found
 		bom:             null,       // BOM for target build
 		failed:          null,       // Failure list html
 	};
 }
 
-function version_cmp(v1, v2)
-{
-	// Compare two versions and return cmp value based on their relative
-	// ordering.  We want to make sure RCs are before any release, and
-	// SNAPSHOTs are after.
-
-	// BUG - lexical, so x.10 < x.2, blarg...
-
-	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126), so late in sort order.
-	v2 = replace(v2, '-SNAP', '.99')+'~';
-	if (v1 < v2) return -1;
-	if (v1 > v2) return  1;
-	return 0;
-}
-
-function version_older(new_version, base_version)
-{
-	// Use version_cmp to see if new_version < base_version.  Useful to detect
-	// if the user is attempting to downgrade their installation.
-	//
-	//  version_older('23.05.2', 'SNAPSHOT') -> true
-
-	return version_cmp(new_version, base_version) < 0;
-}
-
 function show_versions(check_version_to)
 {
-	// Grab the ASU overview to get all the available versions, scan that
+	// Using the ASU overview to get all the available versions, scan that
 	// for version-to and report.
 
-	let versions;
-	if (false) {
-		// Actually, let's ignore ASU server and get the metadata from
-		// the firmware selector, as it keeps a much bigger and more
-		// current list.
-		let conf   = dl_fs_conf();
-		let latest = conf.default_version;
-		versions   = keys(conf.versions);
-		push(versions, ...[ "22.03-SNAPSHOT", "23.05-SNAPSHOT"]);
-		L.log(0, "Available 'version-to' values from %s:\n  ", url.fs_conf);
-	}
-	else {
-		// This is more appropriate, in that it drops the still-available
-		// but out-of-support versions.
-		let overview = dl_overview();
-		let latest   = overview.latest;
-		let branches = overview.branches;
+	L.log(0, "Available 'version-to' values from %s:\n", url.overview);
 
-		versions = [];
-		for (let branch, data in branches) {
-			push(versions, ...data.versions);
+	let branches  = release.branches;
+	let installed = build.from.version;
+	let selected  = build.to?.version ?? options.version;
+	let found_to  = false;
+
+	for (let branch, details in branches) {
+		L.log(0, "  %s %s branch\n", branch, branch == "SNAPSHOT" ? "main" : "release");
+		for (let version in details.versions) {
+			let suffix = [];
+			if (version == details.latest) push(suffix, "latest");
+			if (version == installed     ) push(suffix, "installed");
+			if (version == selected      ) {
+				push(suffix, "requested");
+				found_to = true;
+			}
+			suffix = length(suffix) == 0 ? "" : " (" + join(",", suffix) + ")";
+			L.log(0, "    %s%s\n", version, suffix);
 		}
-		L.log(0, "Available 'version-to' values from %s:\n  ", url.overview);
 	}
 
-	versions = sort(versions, version_cmp);
-	L.log(0, "%s\n", join("\n  ", versions));
-
-	if (check_version_to) {
-		let version = build.to.version;
-		if (version in versions)
-			L.log(0, "\nYour version-to '%s' appears valid, so either:\n" +
-			       "  1) This build has been removed from the server, or\n" +
-			       "  2) The ASU server is having issues.\n", version);
-		else
-			L.log(0, "\nYour specified version-to '%s' is invalid.  " +
-			       "Pick one from above.\n", version);
-	}
+	if (! found_to)
+		L.log(0, "\nYour specified version-to '%s' is invalid.  " +
+		       "Pick one from above.\n", selected);
+	else if (check_version_to)
+		L.log(0, "\nYour version-to '%s' appears valid, so either:\n" +
+		       "  1) This build has been removed from the server, or\n" +
+		       "  2) The ASU server is having issues.\n", selected);
 }
 
 //------------------------------------------------------------------------------
@@ -840,17 +837,6 @@ function collect_device_info()
 	let platform = sysb.board_name;
 	let ver_from = sysb.release.version;
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade
-	let fstype   = options.fstype ? options.fstype : sysb.rootfs_type;
-
-	let ver_to;
-	if (options.version)
-		ver_to = options.version;
-	else if (ver_from == "SNAPSHOT")
-		ver_to = ver_from;
-	else {
-		let conf = dl_fs_conf();
-		ver_to = conf.default_version;
-	}
 
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
@@ -872,108 +858,71 @@ function collect_device_info()
 		sutype = `${sutype}-efi`;
 	}
 
-	// Fix character case of "snapshot" or "-rc" versions.
-	ver_to = uc(ver_to);
-	if (index(ver_to, "RC") > 0)
-		ver_to = lc(ver_to);
+	device = {
+		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
+		target:   target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from system board
+		platform: platform,          // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
+		fstype:   sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
+		sutype:   sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
+	};
 
 	build = {
 		from: proto({
 			version:    ver_from,               // Full version name currently installed: "SNAPSHOT" or "22.03.1"
 			rev_code:   sysb.release.revision,  // Kernel version that is currently running
 			kver:       sysb.kernel,            // Current build on device
-		}, BuildInfo),
-
-		to: proto({
-			version:    ver_to,                 // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
-			rev_code:   null,                   // Build number from target
-			kver:       null,                   // Kernel version of target build, extracted from BOM
-			fstype:     fstype,                 // Requested root FS type
-			img_prefix: null,                   // Prefix of image being built
-			img_file:   null,                   // Full image name to download and install
-			date:       null,                   // Build date of target
-		}, BuildInfo),
-	};
-
-	device = {
-		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in tmp.platform_json
-		target:   target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from board file
-		platform: platform,          // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
-		fstype:   sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
-		sutype:   sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
+		}, BuildInfo)
 	};
 }
 
-function collect_all()
+function collect_build_info()
 {
-	collect_device_info();
+	let ver_to = options.version ? uc(options.version) : null;
+	if (ver_to) {
+		if (index(ver_to, "RC") > 0) ver_to = lc(ver_to);
 
-	let rel_dir;
-	let rel_branch;
-	if (build.to.is_snapshot()) {
-		rel_dir    = "snapshots";
-		rel_branch = "SNAPSHOT";
+		if (ver_to in release.branches) {
+			// User specified a branch name, not a specific version,
+			// so coerce to latest in that branch.
+			ver_to = release.branches[ver_to].latest;
+		}
 	}
+	else if (index(build.from.version, "SNAPSHOT") >= 0)
+		// Any snapshot stays on the same branch.
+		ver_to = build.from.version;
 	else {
-		rel_dir    = `releases/${build.to.version}`;
-		rel_branch = replace(build.to.version, /\.[^.]*$/, "");
+		// Any unspecified non-snapshot gets latest from same branch.
+		let b = branch_of(build.from.version);
+		ver_to = release.branches[b].latest;
 	}
 
-	release = {
-		branch: rel_branch,  // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
-		dir:    rel_dir,     // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
-	};
-
-	// We now know enough to finish up the first URL, which will give us the
-	// keys to the rest of them.
-	// ASU platform.json often updates days after downloads, so the
-	// 'version_code' is wrong and build requests fail.
-	let use_asu = false;
-	url.platform = use_asu ?
-		`${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json` :
-		`${url.downloads_root}/${rel_dir}/targets/${device.target}/profiles.json`;
-
-	let board_json = dl_board();
-	if (! board_json) {
+	let ver_to_branch = branch_of(ver_to);
+	if (! (ver_to_branch in release.branches) ||
+	    ! (ver_to        in release.branches[ver_to_branch].versions)) {
 		show_versions(true);
 		_exit(1);
 	}
 
-	let prof = use_asu ? board_json : board_json.profiles[device.platform];
-	let d = gmtime(board_json.source_date_epoch);
+	let fstype = options.fstype ?? device.fstype;
+	build.to = proto({
+		version:    ver_to,  // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
+		rev_code:   null,    // Build number from target
+		kver:       null,    // Kernel version of target build, extracted from BOM
+		fstype:     fstype,  // Requested root FS type
+		img_prefix: null,    // Prefix of image being built
+		img_file:   null,    // Full image name to download and install
+		date:       null,    // Build date of target
+	}, BuildInfo);
+}
 
-	device.arch         = board_json.arch_packages;
-	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ", d.year, d.mon, d.mday, d.hour, d.min, d.sec);
-	build.to.rev_code   = board_json.version_code;
-	build.to.img_prefix = prof.image_prefix;
+function complete_build_info(profile, board)
+{
+	let dt = gmtime(board.source_date_epoch);
+	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ", dt.year, dt.mon, dt.mday, dt.hour, dt.min, dt.sec);
+	build.to.rev_code   = board.version_code;
+	build.to.img_prefix = profile.image_prefix;
 
-	let location = build.to.is_snapshot()
-		     ? "snapshots/faillogs"
-		     : `releases/faillogs-${release.branch}`;
-	url.failed   = `${url.downloads_root}/${location}/${device.arch}/`;
-
-	url.pkg_arch = `${url.static_root}/${release.dir}/packages/${device.arch}-index.json`;
-	url.pkg_plat = `${url.static_root}/${release.dir}/targets/${device.target}/index.json`;
-
-	let prefix   = "openwrt-";
-	let starget  = replace(device.target, /\//, "-");
-	if (! build.to.is_snapshot())    prefix = `${prefix}${build.to.version}-`;
-	if (build.to.is_rel_snapshot())  prefix = lc(`${prefix}${build.to.rev_code}-`);
-
-	url.download = `${url.downloads_root}/${release.dir}/targets/${device.target}`;
-	url.bom      = `${url.download}/${prefix}${starget}.bom.cdx.json`;
-
-	let ver = "unknown";
-	let bom = dl_bom();
-	for (let comp in bom && bom.components) {
-		if (comp.name == "kernel") {
-			ver = comp.version;
-			break;
-		}
-	}
-	build.to.kver = ver;
-
-	let valid_fstypes = uniq(sort(map(prof.images, (img) => img.filesystem)));
+	let valid_fstypes = uniq(sort(map(profile.images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
 		L.err("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
 		_exit(1);
@@ -981,7 +930,7 @@ function collect_all()
 
 	// Here is where we fix our guess for 'sutype' made above in
 	// 'collect_device_info' (look for "sdcard" there).
-	let valid_sutypes = uniq(sort(map(prof.images, (img) => img.type)));
+	let valid_sutypes = uniq(sort(map(profile.images, (img) => img.type)));
 	if (! (device.sutype in valid_sutypes)) {
 		if (device.sutype == "sysupgrade" && "sdcard" in valid_sutypes) {
 			device.sutype = "sdcard";
@@ -992,16 +941,108 @@ function collect_all()
 		}
 	}
 
-	for (let img in prof.images) {
-		if (img.filesystem == build.to.fstype) {
-			if (img.type == device.sutype) {
-				build.to.img_file = img.name;
-				break;
-			}
+	for (let img in profile.images) {
+		if (img.filesystem == build.to.fstype && img.type == device.sutype) {
+			build.to.img_file = img.name;
+			break;
+		}
+	}
+}
+
+function collect_overview()
+{
+	collect_device_info();
+
+	let overview = dl_overview();
+	url.upstream = overview.upstream_url ?? default_upstream;
+
+	release = {
+		branch: null, // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
+		dir:    null, // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
+		branches: {},
+	};
+
+	let latest = overview.latest; // do all the version table collection here...  overview.branches
+	for (let branch, data in sort(overview.branches, version_cmp)) {
+		release.branches[branch] = {
+			latest:   filter(data.versions, (b) => b in latest)[0],
+			versions: sort(data.versions, version_cmp),
+		};
+	}
+
+	collect_build_info();
+
+	release.branch = branch_of(build.to.version);
+	let active_branch = overview.branches[release.branch];
+	if (! active_branch) {
+		// TODO Should probably check:
+		//    || ! (build.to.version in release.branches[release.branch].versions)
+		// but the versions list we got from the overview is incomplete
+		// (i.e., ASU server will build a lot more than is shown) and
+		// we catch that when trying to fetch board_json below.
+		show_versions(true);
+		_exit(1);
+	}
+
+	release.dir      = replace(active_branch.path, "{version}", build.to.version);
+	packages.changes = active_branch.package_changes;
+}
+
+function collect_platform()
+{
+	// ASU platform.json often updates days after upstream profiles, so the
+	// 'version_code' is wrong and build requests fail.  As of 2024-06-09,
+	// this appears to have been solved, see ASU commit 1e6484d.
+	//
+	// Previously, to solve this issue we'd look at the download server:
+	//   url.platform = `${url.upstream}/${release.dir}/targets/${device.target}/profiles.json`;
+	//   let profile = platform.profiles[device.platform];
+
+	url.platform = `${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json`;
+
+	let platform = dl_platform();
+	if (! platform) {
+		show_versions(true);
+		_exit(1);
+	}
+
+	let profile = platform;
+	device.arch = platform.arch_packages;
+
+	complete_build_info(profile, platform);
+	collect_defaults(platform.default_packages, profile.device_packages);
+}
+
+function collect_all()
+{
+	collect_overview();
+	collect_platform();
+
+	let location = build.to.is_snapshot()
+		     ? "snapshots/faillogs"
+		     : `releases/faillogs-${release.branch}`;
+	url.failed   = `${url.upstream}/${location}/${device.arch}/`;
+
+	url.pkg_arch = `${url.static_root}/${release.dir}/packages/${device.arch}-index.json`;
+	url.pkg_plat = `${url.static_root}/${release.dir}/targets/${device.target}/index.json`;
+
+	let prefix   = "openwrt-";
+	let starget  = replace(device.target, /\//, "-");
+	if (! build.to.is_snapshot())    prefix = `${prefix}${build.to.version}-`;
+	if (build.to.is_rel_snapshot())  prefix = lc(`${prefix}${build.to.rev_code}-`);
+
+	url.download = `${url.upstream}/${release.dir}/targets/${device.target}`;
+	url.bom      = `${url.download}/${prefix}${starget}.bom.cdx.json`;
+
+	build.to.kver = "unknown";
+	let bom = dl_bom();
+	for (let comp in bom && bom.components) {
+		if (comp.name == "kernel") {
+			build.to.kver = comp.version;
+			break;
 		}
 	}
 
-	collect_defaults(board_json.default_packages, prof.device_packages);
 	collect_packages();
 }
 
@@ -1024,6 +1065,8 @@ function dump()
 
 function list()
 {
+	// Generate a list formatted for use with firmware-selector or
+	// source build.
 	let packages;
 	switch (options.format) {
 		case "config":
@@ -1073,29 +1116,6 @@ function show_config()
 	L.log(0, "\n");
 }
 
-const ver_bits = regexp('[^a-z0-9]', 'i');
-function ver_cmp(old, new)
-{
-	let v1 = split(lc(old), ver_bits);
-	let v2 = split(lc(new), ver_bits);
-	for (let i, n1 in v1) {
-		let n2 = v2[i];
-		if (n1 != n2) {
-			if (! isnan(int(n1))) n1 = int(n1);
-			if (! isnan(int(n2))) n2 = int(n2);
-			if (n1 < n2) return -1;
-			if (n1 > n2) return  1;
-		}
-	}
-	return 0;
-}
-
-function ver_older(v1, v2)
-{
-	// Is v1 and older version than v2?
-	return ver_cmp(v1, v2) < 0;
-}
-
 function check_updates()
 {
 	// Scan the old and new package lists, return the number of changed
@@ -1131,7 +1151,7 @@ function check_updates()
 			new = "missing to-version";
 		}
 		else {
-			c2  = L.color(ver_older(old, new) ? L.GREEN : L.YELLOW);
+			c2  = L.color(pkg_ver_older(old, new) ? L.GREEN : L.YELLOW);
 		}
 		L.log(0, f0, pkg, c1, old, c2, new, L.color("reset"));
 	}
@@ -1192,23 +1212,23 @@ function check_pkg_builds()
 	// The lines we're scraping look like:
 	//    <tr><td class="n"><a href="gummiboot/">gummiboot</a>/</td><td class="s">-</td><td class="d">Tue Apr 23 07:05:36 2024</td></tr>
 
+	let info = regexp(
+		'<td class="n"><a href="[^<]*">([^<]*)</a>/</td>' +
+		'<td class="s">[^<]*</td>' +
+		'<td class="d">([^<]*)</td>',
+		'g'
+	);
+
 	let failed = false;
 
 	let html_blob = dl_failures();
-	if (! html_blob) {
+	let feeds = map(match(html_blob, info), (f) => f[1]);
+	if (! html_blob || ! feeds) {
 		L.log(0, "No package build failures found for %s %s.\n\n", build.to.version, device.arch);
 	}
 	else {
 		L.log(0, "There are currently package build failures for %s %s:\n", build.to.version, device.arch);
 
-		let info = regexp(
-			'<td class="n"><a href="[^<]*">([^<]*)</a>/</td>' +
-			'<td class="s">[^<]*</td>' +
-			'<td class="d">([^<]*)</td>',
-			'g'
-		);
-
-		let feeds = map(match(html_blob, info), (f) => f[1]);
 		for (let feed in feeds) {
 			L.log(0, "  Feed: %s\n", feed);
 			html_blob = dl_failures(feed);
@@ -1557,6 +1577,7 @@ initialize_urls();
 
 switch (options.command) {
 	case "versions":
+		collect_overview();
 		show_versions(false);
 		break;
 
