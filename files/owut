@@ -131,6 +131,7 @@ let img_root = match(options.image, /(.*\/|)[^\.]*/)[0];
 let tmp = {
 	bom_json:           `${tmp_root}bom.json`,
 	overview_json:      `${tmp_root}overview.json`,
+	versions_json:      `${tmp_root}versions.json`,
 	pkg_arch_json:      `${tmp_root}packages-arch.json`,
 	pkg_platform_json:  `${tmp_root}packages-plat.json`,
 	platform_json:      `${tmp_root}platform.json`,
@@ -358,6 +359,17 @@ function dl_overview()
 	L.log(0, "Response status: %s\n", rsp?.status);
 	L.err("%s\n", msg);
 	_exit(1);
+}
+
+function dl_versions()
+{
+	// The upstream .versions file containing all the current versions.
+	let msg = "Could not download versions json.";
+	let rsp = _request(url.versions, tmp.versions_json, msg);
+	if (rsp?.status == 200) {
+		return read_tmp_json(tmp.versions_json);
+	}
+	return null;
 }
 
 function dl_bom()
@@ -754,7 +766,8 @@ function initialize_urls()
 		static_root:     static,     // json static api root url
 		store_root:      store,      // api database directory for build results
 		platform:        null,       // release platform json
-		overview:        overview,   // Top-level overview.json, contains available versions
+		overview:        overview,   // Top-level overview.json, contains branch info
+		versions:        null,       // Current versions from upstream buildbot
 		pkg_arch:        null,       // Generic arch package list, containing most of the items
 		pkg_plat:        null,       // Platform packages, built specifically for this platform
 
@@ -953,19 +966,53 @@ function collect_overview()
 
 	let overview = dl_overview();
 	url.upstream = overview.upstream_url ?? default_upstream;
+	url.versions = `${url.upstream}/.versions.json`;
 
 	release = {
-		branch: null, // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
-		dir:    null, // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
+		branch:   null, // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
+		dir:      null, // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
 		branches: {},
 	};
 
-	let latest = overview.latest; // do all the version table collection here...  overview.branches
-	for (let branch, data in sort(overview.branches, version_cmp)) {
-		release.branches[branch] = {
-			latest:   filter(data.versions, (b) => b in latest)[0],
-			versions: sort(data.versions, version_cmp),
+	for (let branch_id, data in overview.branches) {
+		release.branches[branch_id] = {
+			latest:   null,  // Determined below.
+			versions: data.versions,
 		};
+	}
+
+	let bad_releases = [ "23.05.1", ];
+
+	let versions = dl_versions();
+	for (let version in versions.versions_list) {
+		if (version in bad_releases) continue;
+		// Ignore old branches that aren't present in overview.
+		let branch_id = branch_of(version);
+
+// see discussion in issue#2
+//		if (options.legacy && ! (branch_id in release.branches)) {
+//			release.branches[branch_id] = {
+//				latest:   null,
+//				versions: [],
+//			};
+//		}
+
+		let working_branch = release.branches[branch_id];
+		if (working_branch && ! (version in working_branch.versions)) {
+			push(working_branch.versions, version);
+		}
+	}
+
+	// Put everything in order, select 'latest'...
+	release.branches = sort(release.branches, version_cmp);
+	for (let data in values(release.branches)) {
+		data.versions = sort(data.versions, version_cmp);
+		for (let version in data.versions) {
+			if (index(version, "-SNAPSHOT") >= 0) continue;
+			if (data.latest == null || version_older(data.latest, version)) {
+				data.latest = version;
+			}
+		}
 	}
 
 	collect_build_info();
