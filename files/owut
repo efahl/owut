@@ -80,7 +80,6 @@ let commands = {
 
 	versions: { help: "Show available versions." },
 	dump:     { help: "Collect all resources and dump internal data structures." },
-	_test:    { help: null },
 };
 
 let _fstypes   = ["squashfs", "ext4", "ubifs", "jffs2"];
@@ -1307,43 +1306,6 @@ function check_pkg_builds()
 	return ! failed;
 }
 
-function tests()
-{
-	let all = top_level(SrcType.ALL);
-	let def = top_level(SrcType.DEFAULT_ONLY);
-	let usr = top_level(SrcType.USER_ONLY);
-
-	printf('defaults               %d\n  %s\n', length(packages.default), join(" ", packages.default));
-	printf('all          top-level %d\n  %s\n', length(all), join(" ", all));
-	printf('default-only top-level %d\n  %s\n', length(def), join(" ", def));
-	printf('non-default  top-level %d\n  %s\n', length(usr), join(" ", usr));
-
-print('xxxxxxxxxxxxxxxx def vs def\n');
-let i = 0;
-for (let pkg in packageDB) {
-	let in_def = pkg in packages.default;
-	let in_top = pkg in def;
-	if (in_def || in_top) {
-		i++;
-		printf('  %3d %-20s  %-3s  %s\n', i, pkg, in_def ? "def" : "-", in_top ? "top" : "-");
-	}
-}
-
-	if (true) {
-		// Test a handful of packages;
-		for (let pkg in [
-			"iptables", "libncurses6", "libncursesw", "libncurses", "libncursesw6",
-			"dropbear", "vim", "vim-full", "dnsmasq", "dnsmasq-full",
-			"wget", "wget-ssl", "uclient-fetch",
-			"bort",
-		]) {
-			printf("%s\n", pkg);
-			print('  is_default    ', is_default(pkg), '\n');
-			print('  is_installed  ', is_installed(pkg), '\n');
-		}
-	}
-}
-
 function blob(report)
 {
 	// Exclude default packages unless explicitly listed in 'packages'.  When
@@ -1684,15 +1646,6 @@ switch (options.command) {
 
 	case "verify":
 		verify_image();
-		break;
-
-	case "_test":
-		collect_all();
-		show_config();
-		check_updates();
-		check_defaults();
-		check_pkg_builds();
-		tests();
 		break;
 
 	default:
