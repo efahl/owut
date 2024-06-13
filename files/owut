@@ -299,7 +299,7 @@ function _request(url, dst_file, msg, json_blob)
 	uloop.run();
 
 	L.log(1, "Downloaded %s to %s\n", url, dst_file);
-	L.log(2, "Reponse headers = %.4J\n", rsp_headers);
+	L.log(2, "Response headers = %.4J\n", rsp_headers);
 
 	return rsp_status;
 }
@@ -473,15 +473,13 @@ function version_cmp(v1, v2)
 {
 	// Compare two versions and return cmp value based on their relative
 	// ordering.  We want to make sure RCs are before any release, and
-	// SNAPSHOTs are after.
+	// SNAPSHOTs are after, hence the string mangling.
 
-	// BUG - lexical, so x.10 < x.2, blarg...
-
-	v1 = replace(v1, '-SNAP', '.99')+'~';  // ~ = chr(126), so late in sort order.
-	v2 = replace(v2, '-SNAP', '.99')+'~';
-	if (v1 < v2) return -1;
-	if (v1 > v2) return  1;
-	return 0;
+	v1 = replace(v1, '-SNAP', '.99');
+	v1 = replace(v1, 'SNAP',  '99');
+	v2 = replace(v2, '-SNAP', '.99');
+	v2 = replace(v2, 'SNAP',  '99');
+	return pkg_ver_cmp(v1, v2);
 }
 
 function version_older(new_version, base_version)
@@ -536,6 +534,43 @@ function is_available(pkg)
 {
 	// Search for a given package in the combined platform/arch package list.
 	return pkg in packages.available;
+}
+
+//------------------------------------------------------------------------------
+
+const SrcType = {
+	ALL:          0,
+	USER_ONLY:    1,
+	DEFAULT_ONLY: 2,
+};
+
+function top_level(src_type)
+{
+	// Return only the installed top level packages, i.e., those upon which
+	// no other package depends.  'src_type' specifies how the top-level list
+	// is to be filtered.
+
+	let tl;
+	switch (src_type) {
+		case SrcType.ALL:
+			tl = is_top_level;
+			break;
+
+		case SrcType.DEFAULT_ONLY:
+			tl = (pkg) => is_top_level(pkg) && is_default(pkg);
+			break;
+
+		case SrcType.USER_ONLY:
+			tl = (pkg) => is_top_level(pkg) && ! is_default(pkg);
+			break;
+	}
+	return filter(keys(packageDB), tl);
+}
+
+function removed_defaults()
+{
+	// Return the list of default packages that have been removed.
+	return filter(packages.default, (p) => ! is_installed(p));
 }
 
 function add_package(pkg)
@@ -700,43 +735,6 @@ function collect_packages()
 
 //------------------------------------------------------------------------------
 
-const SrcType = {
-	ALL:          0,
-	USER_ONLY:    1,
-	DEFAULT_ONLY: 2,
-};
-
-function top_level(src_type)
-{
-	// Return only the installed top level packages, i.e., those upon which
-	// no other package depends.  'src_type' specifies how the top-level list
-	// is to be filtered.
-
-	let tl;
-	switch (src_type) {
-		case SrcType.ALL:
-			tl = is_top_level;
-			break;
-
-		case SrcType.DEFAULT_ONLY:
-			tl = (pkg) => is_top_level(pkg) && is_default(pkg);
-			break;
-
-		case SrcType.USER_ONLY:
-			tl = (pkg) => is_top_level(pkg) && ! is_default(pkg);
-			break;
-	}
-	return filter(keys(packageDB), tl);
-}
-
-function removed_defaults()
-{
-	// Return the list of default packages that have been removed.
-	return filter(packages.default, (p) => ! is_installed(p));
-}
-
-//------------------------------------------------------------------------------
-
 function initialize_urls()
 {
 	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? default_sysupgrade;
@@ -772,7 +770,7 @@ function show_versions(check_version_to)
 	// Using the ASU overview to get all the available versions, scan that
 	// for version-to and report.
 
-	L.log(0, "Available 'version-to' values from %s:\n", url.overview);
+	L.log(0, "Available 'version-to' values:\n");
 
 	let branches  = release.branches;
 	let installed = build.from.version;
@@ -795,12 +793,12 @@ function show_versions(check_version_to)
 	}
 
 	if (! found_to)
-		L.log(0, "\nYour specified version-to '%s' is invalid.  " +
-		       "Pick one from above.\n", selected);
+		L.log(0, "\nYour specified version-to '%s' is not available.  " +
+			 "Pick one from above.\n", selected);
 	else if (check_version_to)
 		L.log(0, "\nYour version-to '%s' appears valid, so either:\n" +
-		       "  1) This build has been removed from the server, or\n" +
-		       "  2) The ASU server is having issues.\n", selected);
+			 "  1) This build has been removed from the server, or\n" +
+			 "  2) The ASU server is having issues.\n", selected);
 }
 
 //------------------------------------------------------------------------------
