@@ -1471,7 +1471,8 @@ function download()
 	}
 
 	let queries = 0;
-	while (response) {
+	let errors  = 0;
+	while (response && !errors) {
 		let status = response.status;
 
 		L.log(0, "Status: %d\n", status);
@@ -1530,16 +1531,41 @@ function download()
 					return false;
 				}
 
-				let manifest = fs.open(tmp.firmware_man, "w");
-				if (manifest) {
-					manifest.write(sprintf("%.4J\n", response.manifest));
-					manifest.close();
+				let manifest = response.manifest;
+				let manifest_file = fs.open(tmp.firmware_man, "w");
+				if (manifest_file) {
+					manifest_file.write(sprintf("%.4J\n", manifest));
+					manifest_file.close();
 					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
 				}
 
-				sha256.save(sha);
+				// Validate manifest against request.
+				if (response.version_code != build.to.rev_code) {
+					L.err("Firmware revision mismatch: expected %s, but got %s\n",
+						build.to.rev_code, response.version_code);
+					errors++;
+				}
+				for (let pkg in top_level(SrcType.ALL)) {
+					if (! (pkg in manifest)) {
+						L.err("Firmware missing requested package: '%s'\n", pkg);
+						errors++;
+						continue;
+					}
 
-				return verify_image();
+					let expected_version = packageDB[pkg].new_version;
+					let received_version = manifest[pkg];
+					if (received_version != expected_version) {
+						L.err("Firmware package version mismatch: '%s', expected %s, but got %s\n",
+							pkg, expected_version, received_version);
+						errors++;
+						continue;
+					}
+				}
+				if (! errors) {
+					sha256.save(sha);
+					return verify_image();
+				}
+				break;
 
 			// Everything else is "failure - we're done" cases.
 			case 400: // Invalid build request.
@@ -1550,8 +1576,14 @@ function download()
 				if (response.stdout) L.log(0, "stdout =\n%s\n", response.stdout);
 				if (response.stderr) L.log(0, "stderr =\n%s\n", response.stderr);
 				L.err("build failed with status %s\n", status);
-				return false;
+				errors++;
+				break;
 		}
+	}
+
+	if (errors) {
+		L.log(0, "The above errors are often due to the upgrade server lagging behind the\n" +
+			 "build server, first suggestion is to wait a while and try again.\n");
 	}
 	return false;
 }
