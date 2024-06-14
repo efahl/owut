@@ -24,6 +24,7 @@ const default_upstream   = "https://downloads.openwrt.org";
 const Logger = {
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
+	output_is_pipe: ! fs.stdout.isatty(),
 
 	GREEN:  "0;255;0",
 	YELLOW: "255;234;0",
@@ -31,12 +32,16 @@ const Logger = {
 
 	color: function(color_name)
 	{
-		// TODO suppress colorization when stdout is a pipe
+		// Suppress colorization when stdout is a pipe.
+		if (this.output_is_pipe)
+			return "";
 		return color_name == "reset" ? "\033[m" : `\033[38;2;${color_name}m`;
 	},
 
 	colorize: function(color_name, text)
 	{
+		if (this.output_is_pipe)
+			return text;
 		return this.color(color_name) + text + this.color("reset");
 	},
 
