@@ -750,7 +750,7 @@ function collect_packages()
 
 function initialize_urls()
 {
-	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") ?? default_sysupgrade;
+	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") || default_sysupgrade;
 
 	let api        = sysupgrade + "/api/v1";
 	let build      = api + "/build";
@@ -915,7 +915,7 @@ function collect_build_info()
 		_exit(1);
 	}
 
-	let fstype = options.fstype ?? device.fstype;
+	let fstype = options.fstype || device.fstype;
 	build.to = proto({
 		version:    ver_to,  // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
 		rev_code:   null,    // Build number from target
@@ -1513,7 +1513,7 @@ function download()
 				L.log(1, "  build_at       = %s\n", response.build_at);
 				L.log(1, "  version_number = %s\n", response.version_number);
 				L.log(1, "  version_code   = %s\n", response.version_code);
-				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb || "default");
+				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(0, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
 				L.log(2, "  images = %.4J\n",       response.images);
 				L.log(3, "  build_cmd = %.4J\n",    response.build_cmd);
