@@ -7,9 +7,6 @@
 
 let VERSION = "%%VERSION%%";
 
-// There's no ubus module doc yet, so dig through
-// https://github.com/jow-/ucode/blob/master/lib/ubus.c#L1973
-
 const uloop   = require("uloop");
 const uclient = require("uclient");
 
@@ -1451,11 +1448,20 @@ function download()
 	// Use the json_blob to create a build request, run the request and
 	// download the result.
 	//
-	// On success, return true, otherwise spew all sorts of stuff and
-	// return false.
+	// On success, return true.
 	//
-	// To download the built image:
-	// https://github.com/openwrt/luci/blob/master/applications/luci-app-attendedsysupgrade/htdocs/luci-static/resources/view/attendedsysupgrade/overview.js#L108
+	// Certain failures often indicate that the ASU server has fallen
+	// behind the build servers.  For example,
+	//
+	//   Error: Received incorrect version r26608-blah (requested r26620-blah)
+	//
+	// When we see one of these cases, we display one or more error
+	// messages, increment an error counter and use the counter to fall
+	// out of the main build-polling loop, and then generate a final
+	// message "wait a bit and retry".
+	//
+	// Other inexplicable or better explained errors simply show the error
+	// message and then immediately return false.
 
 	let blob = json_blob();
 	if (! blob) return false;
@@ -1531,6 +1537,9 @@ function download()
 					return false;
 				}
 
+				sha256.save(sha);
+
+				// Create the manifest, and validate against request.
 				let manifest = response.manifest;
 				let manifest_file = fs.open(tmp.firmware_man, "w");
 				if (manifest_file) {
@@ -1539,7 +1548,6 @@ function download()
 					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
 				}
 
-				// Validate manifest against request.
 				if (response.version_code != build.to.rev_code) {
 					L.err("Firmware revision mismatch: expected %s, but got %s\n",
 						build.to.rev_code, response.version_code);
@@ -1561,8 +1569,8 @@ function download()
 						continue;
 					}
 				}
+
 				if (! errors) {
-					sha256.save(sha);
 					return verify_image();
 				}
 				break;
