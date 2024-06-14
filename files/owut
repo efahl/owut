@@ -230,42 +230,29 @@ function _request(url, dst_file, msg, json_blob)
 	//   json_blob = optional POST data, GET used if null
 
 	let uc;
-	let rsp_status;
 	let rsp_headers;
 
-	let output = fs.open(dst_file, "w");
-	if (! output) {
-		L.err("%s\nCould not write: %s\n", msg, dst_file);
-		return null;
-	}
-
 	uc = uclient.new(url, null, {
-		header_done: (cb) => {
-			rsp_status  = uc.status();
+		output: null,  // File handle for output file.
 
-			rsp_headers = uc.get_headers();
-			rsp_headers["status"] = rsp_status.status;
-			if (options.keep) {
-				let hdrs = fs.open(tmp.rsp_header, "w");
-				hdrs.write(sprintf("%.J\n", rsp_headers));
-				hdrs.close();
-			}
+		header_done: (cb) => {
+			cb.output   = fs.open(dst_file, "w");
+			rsp_headers = this.get_headers();
+			rsp_headers.status = this.status().status;
 		},
 
 		data_read: (cb) => {
-			let data;
-			while (length(data = uc.read()) > 0) {
-				output.write(data);
-			}
+			// uc.read returns null on eof.
+			while (cb.output.write(uc.read() ?? "") > 0) {}
 		},
 
 		data_eof: (cb) => {
-			output.close();
+			cb.output.close();
 			uloop.end();
 		},
 
 		error: (cb, code) => {
-			L.err("%s\n", code);
+			L.err("uclient error code=%s\n", code);
 			uloop.end();
 		},
 	});
@@ -298,12 +285,21 @@ function _request(url, dst_file, msg, json_blob)
 		L.err("%s\nFailed to send request\n", msg);
 		return null;
 	}
+
 	uloop.run();
 
-	L.log(1, "Downloaded %s to %s\n", url, dst_file);
-	L.log(2, "Response headers = %.4J\n", rsp_headers);
+	if (rsp_headers) {
+		L.log(1, "Downloaded %s to %s\n", url, dst_file);
+		L.log(2, "Response headers = %.4J\n", rsp_headers);
 
-	return rsp_status;
+		if (options.keep) {
+			let hdrs = fs.open(tmp.rsp_header, "w");
+			hdrs.write(sprintf("%.J\n", rsp_headers));
+			hdrs.close();
+		}
+	}
+
+	return uc.status();
 }
 
 function read_tmp_file(file)
@@ -352,7 +348,7 @@ function dl_overview()
 	// more useful items.  It can be found at:
 	//     $url.api_root/branches.json
 
-	let msg = `could not download '${url.overview}', aborting.`;
+	let msg = `Could not download '${url.overview}', aborting.`;
 	let rsp = _request(url.overview, tmp.overview_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.overview_json);
@@ -1619,10 +1615,6 @@ if (options.verbosity) {
 ubus = mod_ubus.connect();
 if (! ubus) {
 	die(`Unable to connect to ubus: ${mod_ubus.error()}\n`);
-}
-
-if (! uloop.init()) {
-	die(`Unable to initialize uloop: ${uloop.error()}\n`);
 }
 
 initialize_urls();
