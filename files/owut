@@ -130,7 +130,6 @@ let release;
 let tmp_root = "/tmp/owut-";
 let img_root = match(options.image, /(.*\/|)[^\.]*/)[0];
 let tmp = {
-	bom_json:           `${tmp_root}bom.json`,
 	overview_json:      `${tmp_root}overview.json`,
 	versions_json:      `${tmp_root}versions.json`,
 	pkg_arch_json:      `${tmp_root}packages-arch.json`,
@@ -365,18 +364,6 @@ function dl_versions()
 	let rsp = _request(url.versions, tmp.versions_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.versions_json);
-	}
-	return null;
-}
-
-function dl_bom()
-{
-	// Download the platform BOM.
-
-	let msg = `could not access BOM for ${build.to.version}, kernel version cannot be determined`;
-	let rsp = _request(url.bom, tmp.bom_json, msg);
-	if (rsp?.status == 200) {
-		return read_tmp_json(tmp.bom_json);
 	}
 	return null;
 }
@@ -770,7 +757,6 @@ function initialize_urls()
 
 		upstream:        null,       // upstream build server base url, from overview.json
 		download:        null,       // upstream with directory at which the "to" build can be found
-		bom:             null,       // BOM for target build
 		failed:          null,       // Failure list html
 	};
 }
@@ -1074,18 +1060,16 @@ function collect_all()
 	if (build.to.is_rel_snapshot())  prefix = lc(`${prefix}${build.to.rev_code}-`);
 
 	url.download = `${url.upstream}/${release.dir}/targets/${device.target}`;
-	url.bom      = `${url.download}/${prefix}${starget}.bom.cdx.json`;
+
+	collect_packages();
 
 	build.to.kver = "unknown";
-	let bom = dl_bom();
-	for (let comp in bom && bom.components) {
-		if (comp.name == "kernel") {
-			build.to.kver = comp.version;
+	for (let pkg, data in packageDB) {
+		if (data.new_version && index(pkg, "kmod-") == 0) {
+			build.to.kver = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
 			break;
 		}
 	}
-
-	collect_packages();
 }
 
 //------------------------------------------------------------------------------
