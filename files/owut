@@ -737,7 +737,7 @@ function initialize_urls()
 
 	let api        = sysupgrade + "/api/v1";
 	let build      = api + "/build";
-	let status     = build + "/<hash>";
+	let status     = build + "/{hash}";
 	let static     = sysupgrade + "/json/v1";
 	let store      = sysupgrade + "/store";
 	let overview   = static + "/overview.json";
@@ -1458,7 +1458,7 @@ function download()
 	let hash = response?.request_hash;
 	if (hash) {
 		L.log(0, "Hash:   %s\n", hash);
-		url.build_status = `${url.build}/${hash}`;
+		url.build_status = replace(url.build_status, "{hash}", hash);
 	}
 
 	let queries = 0;
