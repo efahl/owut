@@ -88,7 +88,7 @@ export const ArgActions = {
 
 		let shorts = [];
 		for (let arg in self) {
-			if (! arg.name) continue;
+			if (! arg.name || ! arg.help) continue;
 
 			if ("position" in arg) {
 				push(shorts, uc(arg.name));
