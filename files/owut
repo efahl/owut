@@ -177,24 +177,24 @@ function _run(command, params)
 //------------------------------------------------------------------------------
 
 let sha256 = {
-	save: function(sum) {
+	save: function(file, sum) {
 		// Create the checksum file from the image name and expected sum.
 		let sums = fs.open(tmp.firmware_sums, "w");
 		if (sums) {
-			sums.write(sprintf("%s  %s\n", sum, options.image));
+			sums.write(sprintf("%s  %s\n", sum, file));
 			sums.close();
 		}
 	},
 
-	saved_sum: function() {
+	saved_sum: function(file) {
 		// Our saved sums is always just a single line
 		let sums = fs.open(tmp.firmware_sums, "r");
 		if (sums) {
 			let line = split(trim(sums.read("line")), /\s+/);
 			sums.close();
-			if (line[1] == options.image)
+			if (line[1] == file)
 				return line[0];
-			L.err("invalid image '%s', but expected '%s' in sum file\n", line[1], options.image);
+			L.err("invalid image '%s', but expected '%s' in sum file\n", line[1], file);
 		}
 		return null;
 	},
@@ -202,14 +202,26 @@ let sha256 = {
 	sum: function(file) {
 		// Return the checksum for the specified file.
 		let data = _run("/bin/busybox", [ "sha256sum", file ]);
-		return data?.code == 0 ? substr(data.stdout, 0, 64) : null;
+		if (data?.code == 0)
+			return substr(data.stdout, 0, 64);
+		this._fatal("sum", data);
 	},
 
 	verify: function() {
 		// Run validation against the saved checksums.
-		return _run("/bin/busybox", [ "sha256sum", "-c", tmp.firmware_sums ]);
+		let data = _run("/bin/busybox", [ "sha256sum", "-c", tmp.firmware_sums ]);
+		if (data?.code == 0)
+			return data;
+		this._fatal("verify", data);
 	},
 
+	_fatal: function(where, data) {
+		L.err("Fatal error in sha256.%s:\n" +
+			"%.4J\n" +
+			"Please report at https://github.com/efahl/owut/issues\n",
+			where, data);
+		_exit(1);
+	},
 };
 
 //------------------------------------------------------------------------------
@@ -1414,7 +1426,7 @@ function verify_image()
 	}
 	else {
 		let file_sha = sha256.sum(image);
-		let expected = sha256.saved_sum();
+		let expected = sha256.saved_sum(image);
 		L.err(`sha256 doesn't match:\n`
 		    `    calculated '${file_sha}'\n`
 		    `    saved      '${expected}'\n`);
@@ -1536,7 +1548,7 @@ function download()
 					return false;
 				}
 
-				sha256.save(sha);
+				sha256.save(dst, sha);
 
 				// Create the manifest, and validate against request.
 				let manifest = response.manifest;
