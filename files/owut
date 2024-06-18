@@ -21,6 +21,13 @@ const default_upstream   = "https://downloads.openwrt.org";
 
 //------------------------------------------------------------------------------
 
+function _exit(status)
+{
+	fs.stdout.flush();
+	fs.stderr.flush();
+	exit(status);
+}
+
 const Logger = {
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
@@ -58,16 +65,14 @@ const Logger = {
 	{
 		if (this._level >= level) printf(fmt, ...args);
 	},
+
+	die: function(fmt, ...args) {
+		this.err(fmt, ...args);
+		_exit(1);
+	},
 };
 
 let L = Logger;
-
-function _exit(status)
-{
-	fs.stdout.flush();
-	fs.stderr.flush();
-	exit(status);
-}
 
 //------------------------------------------------------------------------------
 
@@ -165,13 +170,22 @@ let packages = {  // Dictionary of package lists.
 
 //------------------------------------------------------------------------------
 
+function ubus_check(result, fmt, ...args)
+{
+	if (!result || mod_ubus.error())
+		L.die("ubus: %s\n"+fmt+"\n", mod_ubus.error(), ...args);
+}
+
+function ubus_call(obj, func, args)
+{
+	let result = ubus.call(obj, func, args);
+	ubus_check(result, " from: 'ubus call %s %s %s'", obj, func, args ?? "");
+	return result;
+}
+
 function _run(command, params)
 {
-	let prog = {
-		command: command,
-		params:  params,
-	};
-	return ubus.call("file", "exec", prog);
+	return ubus_call("file", "exec", { command, params });
 }
 
 //------------------------------------------------------------------------------
@@ -216,11 +230,10 @@ let sha256 = {
 	},
 
 	_fatal: function(where, data) {
-		L.err("Fatal error in sha256.%s:\n" +
+		L.die("Fatal error in sha256.%s:\n" +
 			"%.4J\n" +
 			"Please report at https://github.com/efahl/owut/issues\n",
 			where, data);
-		_exit(1);
 	},
 };
 
@@ -367,8 +380,7 @@ function dl_overview()
 		return read_tmp_json(tmp.overview_json);
 	}
 	L.log(0, "Response status: %s\n", rsp?.status);
-	L.err("%s\n", msg);
-	_exit(1);
+	L.die("%s\n", msg);
 }
 
 function dl_versions()
@@ -716,10 +728,10 @@ function collect_packages()
 	//         },
 	//     };
 
-	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
+	let installed = ubus_call("rpc-sys", "packagelist", { "all": true });
 	packages.installed = sort(installed.packages);
 
-	let top_level = ubus.call("rpc-sys", "packagelist", { "all": false });
+	let top_level = ubus_call("rpc-sys", "packagelist", { "all": false });
 	delete top_level.packages["kernel"]; // Not sure how they get here...
 	delete top_level.packages["libc"];
 	packages.top_level = sort(keys(top_level.packages));
@@ -736,8 +748,7 @@ function collect_packages()
 	}
 
 	if (! apply_pkg_mods()) {
-		L.err("Errors collecting package data, terminating...\n");
-		_exit(1);
+		L.die("Errors collecting package data, terminating...\n");
 	}
 
 	packageDB = sort(packageDB);
@@ -839,7 +850,7 @@ const BuildInfo = {
 
 function collect_device_info()
 {
-	let sysb = ubus.call("system", "board");
+	let sysb = ubus_call("system", "board");
 
 	let efi_check = "check";  // force, no, check
 	if (options._device) {
@@ -944,8 +955,7 @@ function complete_build_info(profile, board)
 
 	let valid_fstypes = uniq(sort(map(profile.images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
-		L.err("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
-		_exit(1);
+		L.die("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
 	}
 
 	// Here is where we fix our guess for 'sutype' made above in
@@ -956,8 +966,7 @@ function complete_build_info(profile, board)
 			device.sutype = "sdcard";
 		}
 		else {
-			L.err("sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
-			_exit(1);
+			L.die("sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
 		}
 	}
 
@@ -1623,9 +1632,7 @@ if (options.verbosity) {
 }
 
 ubus = mod_ubus.connect();
-if (! ubus) {
-	die(`Unable to connect to ubus: ${mod_ubus.error()}\n`);
-}
+ubus_check(ubus, "mod_ubus.connect");
 
 initialize_urls();
 
