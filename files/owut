@@ -5,7 +5,9 @@
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
 
+let NAME    = "owut";
 let VERSION = "%%VERSION%%";
+let PROG    = `${NAME}/${VERSION}`;
 
 const uloop   = require("uloop");
 const uclient = require("uclient");
@@ -69,6 +71,10 @@ const Logger = {
 	die: function(fmt, ...args) {
 		this.err(fmt, ...args);
 		_exit(1);
+	},
+	bug: function(fmt, ...args) {
+		// Variant for errors indicating code issue, not a user error.
+		this.die(fmt + "Please report at https://github.com/efahl/owut/issues\n", ...args);
 	},
 };
 
@@ -173,7 +179,7 @@ let packages = {  // Dictionary of package lists.
 function ubus_check(result, fmt, ...args)
 {
 	if (!result || mod_ubus.error())
-		L.die("ubus: %s\n"+fmt+"\n", mod_ubus.error(), ...args);
+		L.bug("ubus: %s\n"+fmt+"\n", mod_ubus.error(), ...args);
 }
 
 function ubus_call(obj, func, args)
@@ -230,10 +236,7 @@ let sha256 = {
 	},
 
 	_fatal: function(where, data) {
-		L.die("Fatal error in sha256.%s:\n" +
-			"%.4J\n" +
-			"Please report at https://github.com/efahl/owut/issues\n",
-			where, data);
+		L.bug("Fatal error in sha256.%s:\n%.2J\n", where, data);
 	},
 };
 
@@ -295,7 +298,7 @@ function _request(url, dst_file, msg, json_blob)
 
 	let type = "GET";
 	let headers = {
-		"User-Agent": "owut/" + VERSION,
+		"User-Agent": PROG,
 	};
 	let args = {
 		headers: headers,
@@ -316,7 +319,7 @@ function _request(url, dst_file, msg, json_blob)
 
 	if (rsp_headers) {
 		L.log(1, "Downloaded %s to %s\n", url, dst_file);
-		L.log(2, "Response headers = %.4J\n", rsp_headers);
+		L.log(2, "Response headers = %.2J\n", rsp_headers);
 
 		if (options.keep) {
 			let hdrs = fs.open(tmp.rsp_header, "w");
@@ -1113,14 +1116,15 @@ function dump()
 {
 	// Send forth a json representation of all the stuff we've collected.
 	L.log(0, '{\n');
-	L.log(0, '"options": %.4J,\n', options);
-	L.log(0, '"url": %.4J,\n', sort(url));
-	L.log(0, '"tmp": %.4J,\n', sort(tmp));
-	L.log(0, '"build": %.4J,\n', build);
-	L.log(0, '"device": %.4J,\n', device);
-	L.log(0, '"release": %.4J,\n', release);
-	L.log(1, '"packages": %.4J,\n', packages);
-	L.log(1, '"packageDB": %.4J,\n', packageDB);
+	L.log(0, '"version": "%s",\n', PROG);
+	L.log(0, '"options": %.2J,\n', options);
+	L.log(0, '"url": %.2J,\n', sort(url));
+	L.log(0, '"tmp": %.2J,\n', sort(tmp));
+	L.log(0, '"build": %.2J,\n', build);
+	L.log(0, '"device": %.2J,\n', device);
+	L.log(0, '"release": %.2J,\n', release);
+	L.log(1, '"packages": %.2J,\n', packages);
+	L.log(1, '"packageDB": %.2J,\n', packageDB);
 	L.log(0, '}\n');
 }
 
@@ -1358,12 +1362,13 @@ function blob(report)
 		}
 	}
 
+	L.log(log_level, "Build: Requesting version %s (kernel %s)\n", build.to.rev_code, build.to.kver);
 	if (build.to.fstype != device.fstype) {
 		L.log(log_level, "Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
 
 	let blob = {
-		client:        "owut/" + VERSION,
+		client:        PROG,
 		target:        device.target,
 		profile:       device.platform,  // sanitized board name
 
@@ -1398,7 +1403,7 @@ function show_blob()
 {
 	let b = blob();
 	if (b) {
-		L.log(0, "%.4J\n", b);
+		L.log(0, "%.2J\n", b);
 	}
 }
 
@@ -1530,9 +1535,9 @@ function download()
 				L.log(1, "  version_code   = %s\n", response.version_code);
 				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(0, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
-				L.log(2, "  images = %.4J\n",       response.images);
-				L.log(3, "  build_cmd = %.4J\n",    response.build_cmd);
-				L.log(3, "  manifest = %.4J\n",     response.manifest);
+				L.log(2, "  images = %.2J\n",       response.images);
+				L.log(3, "  build_cmd = %.2J\n",    response.build_cmd);
+				L.log(3, "  manifest = %.2J\n",     response.manifest);
 				L.log(0, "\n");
 
 				let image = select_image(response.images);
@@ -1563,7 +1568,7 @@ function download()
 				let manifest = response.manifest;
 				let manifest_file = fs.open(tmp.firmware_man, "w");
 				if (manifest_file) {
-					manifest_file.write(sprintf("%.4J\n", manifest));
+					manifest_file.write(sprintf("%.2J\n", response));
 					manifest_file.close();
 					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
 				}
