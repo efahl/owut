@@ -1010,7 +1010,7 @@ function collect_overview()
 		// Ignore old branches that aren't present in overview.
 		let branch_id = branch_of(version);
 
-// see discussion in issue#2
+// see discussion in issue#2 regarding adding branches from .versions.json to augment overview
 //		if (options.legacy && ! (branch_id in release.branches)) {
 //			release.branches[branch_id] = {
 //				latest:   null,
@@ -1232,10 +1232,7 @@ function check_updates()
 	}
 	L.log(0, "\n");
 
-	return {
-		missing: missing,
-		changes: changes,
-	};
+	return { missing, changes };
 }
 
 function check_defaults()
@@ -1641,6 +1638,8 @@ ubus_check(ubus, "mod_ubus.connect");
 
 initialize_urls();
 
+let updates;
+let errors;
 switch (options.command) {
 	case "versions":
 		collect_overview();
@@ -1660,9 +1659,17 @@ switch (options.command) {
 	case "check":
 		collect_all();
 		show_config();
-		check_updates();
+		updates = check_updates();
 		check_defaults();
-		check_pkg_builds();
+		errors = ! check_pkg_builds() || updates.missing;
+		if (errors) 
+			L.err("Checks reveal errors, do not upgrade.\n");
+		else {
+			L.log(0, updates.changes == 0
+				? "There are no changes, upgrade not necessary.\n"
+				: "It is safe to proceed with an upgrade.\n"
+			);
+		}
 		break;
 
 	case "blob":
@@ -1674,14 +1681,14 @@ switch (options.command) {
 	case "upgrade":
 		collect_all();
 		show_config();
-		let updates = check_updates();
+		updates = check_updates();
 		if (updates.missing) {
-			L.err("update checks reveal errors, can't proceed\n");
+			L.err("Update checks reveal errors, can't proceed.\n");
 			break;
 		}
 		check_defaults();
 		if (! check_pkg_builds()) {
-			L.err("package build checks reveal errors, can't proceed\n");
+			L.err("Package build checks reveal errors, can't proceed.\n");
 			break;
 		}
 		if (updates.changes == 0) {
