@@ -1,0 +1,26 @@
+#!/bin/sh
+
+[ -n "$IPKG_INSTROOT" ] && return 0
+
+conf_file="/etc/config/attendedsysupgrade"
+
+if [ ! -e "$conf_file" ]; then
+. /etc/uci-defaults/attendedsysupgrade
+fi
+
+if [ -z "$(uci get attendedsysupgrade.owut 2> /dev/null)" ]; then
+cat <<CONF >> "$conf_file"
+# Example configuration for 'owut'.  The option names are the same
+# as those used on the command line, with all '-' dashes replaced by
+# '_' underscores.  Use 'owut --help' to see more.
+
+config owut 'owut'
+#       option verbosity    0
+#       option keep         true
+#       option init_script '/root/data/my-init-script.sh'
+#       option image       '/tmp/my-firmware-img.bin'
+#       option rootfs_size  256
+
+CONF
+echo "Please see owut section of $conf_file for example options."
+fi
