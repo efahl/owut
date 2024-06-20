@@ -125,7 +125,7 @@ arg_defs.set_bookends(
 	"\nThank you!  Come again!\n"
 );
 
-let options = arg_defs.parse(null, {owut: "owut"});
+let options = arg_defs.parse(null, {attendedsysupgrade: "owut"});
 
 L.set_level(options.verbosity);
 
