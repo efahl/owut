@@ -131,7 +131,6 @@ L.set_level(options.verbosity);
 
 //------------------------------------------------------------------------------
 
-let ubus;
 let url;      // See initialize_urls
 let build;    // See collect_all for next three
 let device; 
@@ -176,23 +175,32 @@ let packages = {  // Dictionary of package lists.
 
 //------------------------------------------------------------------------------
 
-function ubus_check(result, fmt, ...args)
-{
-	if (!result || mod_ubus.error())
-		L.bug("ubus: %s\n"+fmt+"\n", mod_ubus.error(), ...args);
-}
+const ubus = {
+	init: function() {
+		this._bus = mod_ubus.connect();
+		this.check(this._bus, "mod_ubus.connect");
+	},
+	term: function() { this._bus.disconnect(); },
 
-function ubus_call(obj, func, args)
-{
-	let result = ubus.call(obj, func, args);
-	ubus_check(result, " from: 'ubus call %s %s %s'", obj, func, args ?? "");
-	return result;
-}
+	check: function(result, fmt, ...args) {
+		if (!result || mod_ubus.error())
+			L.bug("ubus: %s\n"+fmt+"\n", mod_ubus.error(), ...args);
+	},
 
-function _run(command, params)
-{
-	return ubus_call("file", "exec", { command, params });
-}
+	call: function(obj, func, args) {
+		let result = this._bus.call(obj, func, args);
+		this.check(result, " from: 'ubus call %s %s %s'", obj, func, args ?? "");
+		return result;
+	},
+
+	raw_run: function(command, ...params) {
+		// Dangerous: no error checking.
+		return this._bus.call("file", "exec", { command, params });
+	},
+	run: function(command, ...params) {
+		return this.call("file", "exec", { command, params });
+	},
+};
 
 //------------------------------------------------------------------------------
 
@@ -221,7 +229,7 @@ let sha256 = {
 
 	sum: function(file) {
 		// Return the checksum for the specified file.
-		let data = _run("/bin/busybox", [ "sha256sum", file ]);
+		let data = ubus.run("/bin/busybox", "sha256sum", file);
 		if (data?.code == 0)
 			return substr(data.stdout, 0, 64);
 		this._fatal("sum", data);
@@ -229,7 +237,7 @@ let sha256 = {
 
 	verify: function() {
 		// Run validation against the saved checksums.
-		let data = _run("/bin/busybox", [ "sha256sum", "-c", tmp.firmware_sums ]);
+		let data = ubus.run("/bin/busybox", "sha256sum", "-c", tmp.firmware_sums);
 		if (data?.code == 0)
 			return data;
 		this._fatal("verify", data);
@@ -242,10 +250,15 @@ let sha256 = {
 
 //------------------------------------------------------------------------------
 
-function sysupgrade(file, options)
+function sysupgrade(file, check, options)
 {
-	let params = options ? [...options, file] : [file];
-	return _run("sysupgrade", params);
+	// When sysupgrade performs the upgrade, it returns with shell status
+	// of '10', so uc_ubus_call raises an error.  '--test' is fine, it
+	// returns proper status.
+
+	return check 
+		? ubus.run("sysupgrade", ...options, file)
+		: ubus.raw_run("sysupgrade", ...(options ?? []), file);
 }
 
 //------------------------------------------------------------------------------
@@ -731,10 +744,10 @@ function collect_packages()
 	//         },
 	//     };
 
-	let installed = ubus_call("rpc-sys", "packagelist", { "all": true });
+	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
 	packages.installed = sort(installed.packages);
 
-	let top_level = ubus_call("rpc-sys", "packagelist", { "all": false });
+	let top_level = ubus.call("rpc-sys", "packagelist", { "all": false });
 	delete top_level.packages["kernel"]; // Not sure how they get here...
 	delete top_level.packages["libc"];
 	packages.top_level = sort(keys(top_level.packages));
@@ -853,7 +866,7 @@ const BuildInfo = {
 
 function collect_device_info()
 {
-	let sysb = ubus_call("system", "board");
+	let sysb = ubus.call("system", "board");
 
 	let efi_check = "check";  // force, no, check
 	if (options._device) {
@@ -1447,7 +1460,7 @@ function verify_image()
 		return false;
 	}
 
-	result = sysupgrade(image, ["--test"]);
+	result = sysupgrade(image, true, ["--test"]);
 	if (result?.code == 0) {
 		L.log(0, "  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
 	}
@@ -1550,14 +1563,14 @@ function download()
 				let dst = options.image;
 
 				L.log(0, "Image source: %s\n", img);
-				L.log(0, "Image saved : %s\n", dst);
 
 				let msg = `couldn't download image ${image.name}`;
 				let rsp = _request(img, dst, msg);
 				if (rsp?.status != 200) {
-					// need more output here, if 404 or whatever
+					L.err(msg);
 					return false;
 				}
+				L.log(0, "Image saved : %s\n", dst);
 
 				sha256.save(dst, sha);
 
@@ -1624,7 +1637,8 @@ function install()
 	// Probably need some more options reflected from sysupgrade itself.
 	// '-n' = discard config comes to mind first, maybe '-f' = force, too.
 
-	sysupgrade(options.image);
+	sysupgrade(options.image, false);
+	L.log(0, "Installing %s and rebooting...\n", options.image);
 }
 
 //------------------------------------------------------------------------------
@@ -1633,8 +1647,7 @@ if (options.verbosity) {
 	arg_defs.show_version();
 }
 
-ubus = mod_ubus.connect();
-ubus_check(ubus, "mod_ubus.connect");
+ubus.init();
 
 initialize_urls();
 
@@ -1720,5 +1733,5 @@ switch (options.command) {
 }
 
 uloop.done();
-ubus.disconnect();
+ubus.term();
 _exit();
