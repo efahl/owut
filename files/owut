@@ -104,7 +104,7 @@ let arg_defs = proto([
 	ap.DEFAULT_HELP,
 	ap.DEFAULT_VERSION,
 	{ name: "command",     position: 0, one_of: commands,      action: "store",                               help: "Sub-command to execute" },
-	{ name: "version",     short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "version_to",  short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
 	{ name: "force",                    long: "--force",       action: "set",                 default: false, help: "Force download when there are no changes detected." },
@@ -119,9 +119,10 @@ let arg_defs = proto([
 	{ name: "_device",                  long:"--device",       action: "store",     nargs: 1, default: null }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
 
-arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool version ${VERSION} (${sourcepath()})`);
+arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
 arg_defs.set_bookends(
-	"\nowut is an upgrade tool for OpenWrt.\n",
+	"\nowut is an upgrade tool for OpenWrt.  Full docs at\n" +
+	"  https://openwrt.org/docs/guide-user/installation/sysupgrade.owut\n",
 	"\nThank you!  Come again!\n"
 );
 
@@ -222,7 +223,7 @@ let sha256 = {
 			sums.close();
 			if (line[1] == file)
 				return line[0];
-			L.err("invalid image '%s', but expected '%s' in sum file\n", line[1], file);
+			L.err("Invalid image: got '%s', but expected '%s' in sum file\n", line[1], file);
 		}
 		return null;
 	},
@@ -390,7 +391,7 @@ function dl_overview()
 	// more useful items.  It can be found at:
 	//     $url.api_root/branches.json
 
-	let msg = `Could not download '${url.overview}', aborting.`;
+	let msg = `Could not download '${url.overview}', terminating.`;
 	let rsp = _request(url.overview, tmp.overview_json, msg);
 	if (rsp?.status == 200) {
 		return read_tmp_json(tmp.overview_json);
@@ -617,7 +618,7 @@ function add_package(pkg)
 		return true;
 	}
 	if (! is_available(pkg)) {
-		L.err("package '%s' is not available on this platform\n", pkg);
+		L.err("Package '%s' is not available on this platform\n", pkg);
 		return false;
 	}
 
@@ -634,7 +635,9 @@ function remove_package(pkg)
 {
 	// pkg - the package to remove, if possible.
 
-	if (is_installed(pkg)) {
+	if (! is_installed(pkg))
+		L.err("Package '%s' is not installed and cannot be removed\n", pkg);
+	else {
 		if (! is_top_level(pkg)) {
 			L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
 		}
@@ -764,7 +767,7 @@ function collect_packages()
 	}
 
 	if (! apply_pkg_mods()) {
-		L.die("Errors collecting package data, terminating...\n");
+		L.die("Errors collecting package data, terminating.\n");
 	}
 
 	packageDB = sort(packageDB);
@@ -811,7 +814,7 @@ function show_versions(check_version_to)
 
 	let branches  = release.branches;
 	let installed = build.from.version;
-	let selected  = build.to?.version ?? options.version;
+	let selected  = build.to?.version ?? options.version_to;
 	let found_to  = false;
 
 	for (let branch, details in branches) {
@@ -868,7 +871,7 @@ function collect_device_info()
 {
 	let sysb = ubus.call("system", "board");
 
-	let efi_check = "check";  // force, no, check
+	let efi_check = "check";  // one of: force, no, check
 	if (options._device) {
 		// Allow test cases (or "cross" downloads?), using undocumented
 		// option.  tegra is one with 'sdcard' sutype, use as follows:
@@ -924,7 +927,7 @@ function collect_device_info()
 
 function collect_build_info()
 {
-	let ver_to = options.version ? uc(options.version) : null;
+	let ver_to = options.version_to ? uc(options.version_to) : null;
 	if (ver_to) {
 		if (index(ver_to, "RC") > 0) ver_to = lc(ver_to);
 
@@ -1235,7 +1238,7 @@ function check_updates()
 	}
 
 	if (missing) {
-		L.log(0, "%d packages missing in target version, %s\n", missing, L.colorize(L.RED, "DO NOT UPGRADE!"));
+		L.log(0, "%d packages missing in target version, %s\n", missing, L.colorize(L.RED, "cannot upgrade"));
 	}
 	if (changes) {
 		L.log(0, "%d packages are out-of-date.\n", changes);
@@ -1318,10 +1321,10 @@ function check_pkg_builds()
 					let msg;
 					if (is_installed(pkg)) {
 						failed = true;
-						msg = L.colorize(L.RED, "Package installed locally, DO NOT UPGRADE!");
+						msg = L.colorize(L.RED, "package installed locally, cannot upgrade");
 					}
 					else {
-						msg = "Package not installed locally";
+						msg = "not installed";
 					}
 					L.log(0, fmt, pkg, date, msg);
 				}
@@ -1342,24 +1345,19 @@ function blob(report)
 	// Exclude default packages unless explicitly listed in 'packages'.  When
 	// moving between releases, default packages may be added, deleted or
 	// renamed, which can result in bricks if something important is missed.
-	//
-	// On the other hand, what if we replace a default package, say,
-	// 'dnsmasq' with 'dnsmasq-full'?  Then we must use the full top-level
-	// list, plus target version defaults, and set this value 'true'.
-	//
-	// False is the safer option, so that's our default value.
+
 	let contains_defaults = true;
 
 	let log_level = report ? 0 : 1;
 
-	let build_list = top_level(SrcType.ALL); // should be '! contains_defaults' - but not really...
+	let build_list = top_level(SrcType.ALL);
 
 	let init_script;
 	if (options.init_script) {
 		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
 		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
-			L.err("init script file '%s' does not exist\n", options.init_script);
+			L.err("Init script file '%s' does not exist\n", options.init_script);
 			return null;
 		}
 		else {
@@ -1437,7 +1435,7 @@ function verify_image()
 	let image = options.image;
 
 	if (! fs.access(image)) {
-		L.err("image file '%s' does not exist\n", image);
+		L.err("Image file '%s' does not exist\n", image);
 		return false;
 	}
 
@@ -1552,7 +1550,7 @@ function download()
 
 				let image = select_image(response.images);
 				if (! image) {
-					L.err("Could not locate an image for '%s' and '%s'...\n", build.to.fstype, device.sutype);
+					L.err("Could not locate an image for '%s' and '%s'\n", build.to.fstype, device.sutype);
 					return false;
 				}
 
@@ -1564,7 +1562,7 @@ function download()
 
 				L.log(0, "Image source: %s\n", img);
 
-				let msg = `couldn't download image ${image.name}`;
+				let msg = `Couldn't download image ${image.name}`;
 				let rsp = _request(img, dst, msg);
 				if (rsp?.status != 200) {
 					L.err(msg);
@@ -1618,7 +1616,7 @@ function download()
 				if (response.error ) L.log(0, "error  =\n%s\n", response.error);
 				if (response.stdout) L.log(0, "stdout =\n%s\n", response.stdout);
 				if (response.stderr) L.log(0, "stderr =\n%s\n", response.stderr);
-				L.err("build failed with status %s\n", status);
+				L.err("Build failed with status %s\n", status);
 				errors++;
 				break;
 		}
@@ -1676,7 +1674,7 @@ switch (options.command) {
 		check_defaults();
 		errors = ! check_pkg_builds() || updates.missing;
 		if (errors) 
-			L.err("Checks reveal errors, do not upgrade.\n");
+			L.err("Checks reveal errors, do not upgrade\n");
 		else {
 			L.log(0, updates.changes == 0
 				? "There are no changes, upgrade not necessary.\n"
@@ -1696,12 +1694,12 @@ switch (options.command) {
 		show_config();
 		updates = check_updates();
 		if (updates.missing) {
-			L.err("Update checks reveal errors, can't proceed.\n");
+			L.err("Update checks reveal errors, can't proceed\n");
 			break;
 		}
 		check_defaults();
 		if (! check_pkg_builds()) {
-			L.err("Package build checks reveal errors, can't proceed.\n");
+			L.err("Package build checks reveal errors, can't proceed\n");
 			break;
 		}
 		if (updates.changes == 0) {
@@ -1728,7 +1726,7 @@ switch (options.command) {
 		break;
 
 	default:
-		L.err("'%s' not implemented yet.\n", options.command);
+		L.err("'%s' not implemented\n", options.command);
 		break;
 }
 
