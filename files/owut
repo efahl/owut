@@ -415,8 +415,8 @@ function dl_failures(feed)
 {
 	// The build failures info is html that resides in odd, one-man-out URL
 	// locations:
-	//     https://downloads.openwrt.org/snapshots/faillogs/mipsel_24kc/<feed>/
-	//     https://downloads.openwrt.org/releases/faillogs-23.05/mipsel_24kc/<feed>/
+	//   https://downloads.openwrt.org/snapshots/faillogs/mipsel_24kc/<feed>/
+	//   https://downloads.openwrt.org/releases/faillogs-23.05/mipsel_24kc/<feed>/
 
 	let uri = feed ? `${url.failed}${feed}/` : url.failed;
 	let htm = `${tmp.failed_html}-${feed ? feed : "feeds"}.html`;
@@ -526,7 +526,7 @@ function version_older(new_version, base_version)
 	// Use version_cmp to see if new_version < base_version.  Useful to detect
 	// if the user is attempting to downgrade their installation.
 	//
-	//  version_older('23.05.2', 'SNAPSHOT') -> true
+	//   version_older('23.05.2', 'SNAPSHOT') -> true
 
 	return version_cmp(new_version, base_version) < 0;
 }
@@ -631,12 +631,14 @@ function add_package(pkg)
 	return true;
 }
 
-function remove_package(pkg)
+function remove_package(pkg, silent)
 {
 	// pkg - the package to remove, if possible.
 
-	if (! is_installed(pkg))
-		L.err("Package '%s' is not installed and cannot be removed\n", pkg);
+	if (! is_installed(pkg)) {
+		if (! silent)
+			L.err("Package '%s' is not installed and cannot be removed\n", pkg);
+	}
 	else {
 		if (! is_top_level(pkg)) {
 			L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
@@ -656,7 +658,7 @@ function replace_package(old_pkg, new_pkg)
 	// have nothing to do but report success.
 
 	if (is_installed(old_pkg)) {
-		remove_package(old_pkg);
+		remove_package(old_pkg, true);
 		return add_package(new_pkg);
 	}
 	return true;
@@ -669,10 +671,7 @@ function collect_defaults(board, device)
 	// Use both board json for its defaults, then add the device-specific
 	// defaults to make one big defaults list.
 
-	packages.default = ["kernel"];
-	push(packages.default, ...board);
-	push(packages.default, ...device);
-	packages.default = sort(packages.default);
+	packages.default = sort(["kernel", ...board, ...device]);
 }
 
 function apply_pkg_mods()
