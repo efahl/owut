@@ -276,8 +276,6 @@ function _request(url, dst_file, msg, json_blob)
 	let rsp_headers;
 
 	uc = uclient.new(url, null, {
-		output: null,  // File handle for output file.
-
 		header_done: (cb) => {
 			cb.output   = fs.open(dst_file, "w");
 			rsp_headers = this.get_headers();
