@@ -1,34 +1,43 @@
 # owut - OpenWrt Upgrade Tool
 
-When @dangowrt mentioned rewriting `auc` in `ucode`, I took the bait and this is the result.
+`owut` is command line tool that upgrades your router's firmware.  It creates and installs custom builds of OpenWrt retaining all of the currently installed packages and configuration. 
 
-https://github.com/openwrt/packages/pull/22144#pullrequestreview-1795466339
+Follow along or participate in the [owut package discussion](https://forum.openwrt.org/t/owut-openwrt-upgrade-tool/200035) on the OpenWrt forum.
 
 ## Installation
 
-`owut` is currently not fully released as an OpenWrt package.  Follow along at https://github.com/openwrt/packages/pull/24324
-
 > [!WARNING]
-> As of 2024-04-22, `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running a release version, you are out of luck.
+> As of 2024-06-26, the dependency `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running release version 23.05 or earlier, you cannot install `owut`.
 
+`owut` is a standard OpenWrt package, making installation quite simple.
 
-Or, for the hardy, try this:
+```bash
+# If using opkg package manager:
+opkg update && opkg install owut
+
+# If using apk package manager:
+apk --update-cache add owut
+```
+
+Or, for the hardy or adventurous, install from source:
 ```bash
 opkg update
-opkg install ucode-mod-uclient ucode-mod-uloop
+opkg install attendedsysupgrade-common rpcd-mod-file ucode ucode-mod-fs \
+             ucode-mod-ubus ucode-mod-uci ucode-mod-uclient ucode-mod-uloop
 
 [ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
 wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
 wget -O /usr/bin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
 chmod +x /usr/bin/owut
-
-# Keep it installed across upgrades.
-echo '/usr/share/ucode/utils/argparse.uc' >> /etc/sysupgrade.conf
-echo '/usr/bin/owut' >> /etc/sysupgrade.conf
 ```
+
 ## Documentation
 
-Full documentation is available on the OpenWrt wiki at https://openwrt.org/docs/guide-user/installation/sysupgrade.owut
+Short documentation is available on your device, use `owut --help`
+
+Full documentation is available in the OpenWrt wiki at [owut: OpenWrt Upgrade Tool](https://openwrt.org/docs/guide-user/installation/sysupgrade.owut)
+
+Packaging in https://github.com/openwrt/packages/blob/master/utils/owut/Makefile
 
 ## License
 
