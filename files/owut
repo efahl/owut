@@ -872,10 +872,10 @@ function collect_device_info()
 	if (options._device) {
 		// Allow test cases (or "cross" downloads?), using undocumented
 		// option.  tegra is one with 'sdcard' sutype, use as follows:
-		//   owut ... --device compulab_trimslice:tegra/generic:squashfs
+		//   owut ... --device tegra/generic:compulab_trimslice:squashfs
 		let bv = split(options._device, ":");
-		sysb.board_name     = bv[0];
-		sysb.release.target = bv[1];
+		sysb.release.target = bv[0];
+		sysb.board_name     = bv[1];
 		sysb.rootfs_type    = bv[2];
 		efi_check           = bv[3] || "no";  // Default to no, if unspecified.
 	}
