@@ -264,12 +264,11 @@ function sysupgrade(file, check, options)
 
 //------------------------------------------------------------------------------
 
-function _request(url, dst_file, msg, json_blob)
+function _request(url, dst_file, json_blob)
 {
 	//  uclient function for simple http requests
 	//   url       = self explanatory
 	//   dst_file  = result of request
-	//   msg       = error message if request fails
 	//   json_blob = optional POST data, GET used if null
 
 	let uc;
@@ -277,7 +276,11 @@ function _request(url, dst_file, msg, json_blob)
 
 	uc = uclient.new(url, null, {
 		header_done: (cb) => {
-			cb.output   = fs.open(dst_file, "w");
+			cb.output = fs.open(dst_file, "w");
+			if (! cb.output) {
+				L.err("opening %s: %s\n", dst_file, fs.error());
+				uloop.end();
+			}
 			rsp_headers = this.get_headers();
 			rsp_headers.status = this.status().status;
 		},
@@ -293,18 +296,18 @@ function _request(url, dst_file, msg, json_blob)
 		},
 
 		error: (cb, code) => {
-			L.err("uclient error code=%s\n", code);
+			L.err("uclient error code=%s\n  This could be due to the server being down or inaccessible, check\n  %s", code, url);
 			uloop.end();
 		},
 	});
 
 	if (! uc.ssl_init({verify: false})) {
-		L.err("%s\nFailed to initialize SSL\n", msg);
+		L.err("Failed to initialize SSL\n");
 		return null;
 	}
 
 	if (! uc.connect()) {
-		L.err("%s\nFailed to connect\n", msg);
+		L.err("Failed to connect\n");
 		return null;
 	}
 
@@ -323,7 +326,7 @@ function _request(url, dst_file, msg, json_blob)
 	}
 
 	if (! uc.request(type, args)) {
-		L.err("%s\nFailed to send request\n", msg);
+		L.err("Failed to send request\n");
 		return null;
 	}
 
@@ -368,16 +371,20 @@ function read_tmp_json(file)
 //------------------------------------------------------------------------------
 //-- Source-specific downloaders -----------------------------------------------
 
+function dl_json(url, json_file, keep_going)
+{
+	let rsp = _request(url, json_file);
+	if (rsp?.status == 200) {
+		return read_tmp_json(json_file);
+	}
+	L.err("Response status %s while downloading\n  %s\n", rsp?.status, url);
+	return keep_going ? null : _exit(1);
+}
+
 function dl_platform()
 {
 	// Get the starting point for the target build.
-
-	let msg = "Could not download platform json.";
-	let rsp = _request(url.platform, tmp.platform_json, msg);
-	if (rsp?.status == 200) {
-		return read_tmp_json(tmp.platform_json);
-	}
-	return null;
+	return dl_json(url.platform, tmp.platform_json, true);
 }
 
 function dl_overview()
@@ -387,26 +394,15 @@ function dl_overview()
 	// Note that auc uses branches.json instead.  Its content is all included
 	// in overview.json at '$.branches', but we like overview as it has a few
 	// more useful items.  It can be found at:
-	//     $url.api_root/branches.json
+	//   url.api_root/branches.json
 
-	let msg = `Could not download '${url.overview}', terminating.`;
-	let rsp = _request(url.overview, tmp.overview_json, msg);
-	if (rsp?.status == 200) {
-		return read_tmp_json(tmp.overview_json);
-	}
-	L.log(0, "Response status: %s\n", rsp?.status);
-	L.die("%s\n", msg);
+	return dl_json(url.overview, tmp.overview_json);
 }
 
 function dl_versions()
 {
 	// The upstream .versions file containing all the current versions.
-	let msg = "Could not download versions json.";
-	let rsp = _request(url.versions, tmp.versions_json, msg);
-	if (rsp?.status == 200) {
-		return read_tmp_json(tmp.versions_json);
-	}
-	return null;
+	return dl_json(url.versions, tmp.versions_json);
 }
 
 function dl_failures(feed)
@@ -419,60 +415,38 @@ function dl_failures(feed)
 	let uri = feed ? `${url.failed}${feed}/` : url.failed;
 	let htm = `${tmp.failed_html}-${feed ? feed : "feeds"}.html`;
 
-	let msg = "checking build failures";
-	let rsp = _request(uri, htm, msg);
+	let rsp = _request(uri, htm);
 	if (rsp?.status == 200) {
 		return read_tmp_file(htm);
 	}
-	return null;
+	return null;  // Expected result when no failures found.
 }
 
 function dl_package_versions()
 {
-	// Downloads and consolidates the two sources of package versions into
+	// Download and consolidate the two sources of package versions into
 	// a single object.
 
-	let msg = "could not download package list to determine versions";
-	let rsp = _request(url.pkg_arch, tmp.pkg_arch_json, msg);
-	if (rsp?.status != 200) return null;
-	rsp = _request(url.pkg_plat, tmp.pkg_platform_json, msg);
-	if (rsp?.status != 200) return null;
-
-	return {
-		...read_tmp_json(tmp.pkg_arch_json),
-		...read_tmp_json(tmp.pkg_platform_json).packages,
-	};
+	let arch = dl_json(url.pkg_arch, tmp.pkg_arch_json, true);
+	let plat = dl_json(url.pkg_plat, tmp.pkg_platform_json, true);
+	return { ...(arch ?? []), ...(plat?.packages ?? []) };
 }
 
 function dl_build(config)
 {
-	if (options.keep) {
-		L.log(1, "Saving build blob to %s\n", tmp.req_json);
-		let save = fs.open(tmp.req_json, "w");
-		if (save) {
-			save.write(config);
-			save.close();
-		}
-	}
-
-	let msg = "failed to initiate build";
-	let rsp = _request(url.build, tmp.build_json, msg, config);
-	if (rsp) {
-		return read_tmp_json(tmp.build_json);
-	}
-	return null;
+	// Start a build by POSTing the json build configuration.
+	let rsp = _request(url.build, tmp.build_json, config);
+	return rsp && read_tmp_json(tmp.build_json);
 }
 
 function dl_build_status()
 {
-	// The response is considered valid even if status != 200, as this is the
-	// ongoing status query.  See switch cases in 'download' function.
+	// The response is considered valid even if status != 200 (usually 202),
+	// as this is the  ongoing status query.  See switch cases in 'download'
+	// function.
 
-	let msg = "failed to get build status response";
-	if (_request(url.build_status, tmp.build_status_json, msg)) {
-		return read_tmp_json(tmp.build_status_json);
-	}
-	return null;
+	let rsp = _request(url.build_status, tmp.build_status_json);
+	return rsp && read_tmp_json(tmp.build_status_json);
 }
 
 //------------------------------------------------------------------------------
@@ -1081,8 +1055,7 @@ function collect_platform()
 
 	let platform = dl_platform();
 	if (! platform) {
-		show_versions(true);
-		_exit(1);
+		L.die("Unsupported platform '%s' or target '%s'\n", device.platform, device.target);
 	}
 
 	let profile = platform;
@@ -1496,6 +1469,15 @@ function download()
 	let blob = json_blob();
 	if (! blob) return false;
 
+	if (options.keep) {
+		L.log(1, "Saving build blob to %s\n", tmp.req_json);
+		let save = fs.open(tmp.req_json, "w");
+		if (save) {
+			save.write(blob);
+			save.close();
+		}
+	}
+
 	let start    = time();
 	let response = dl_build(blob);
 	L.log(0, "\nRequesting build ----------------------\n");
@@ -1559,10 +1541,9 @@ function download()
 
 				L.log(0, "Image source: %s\n", img);
 
-				let msg = `Couldn't download image ${image.name}`;
-				let rsp = _request(img, dst, msg);
+				let rsp = _request(img, dst);
 				if (rsp?.status != 200) {
-					L.err(msg);
+					L.err("Couldn't download image %s\n", image.name);
 					return false;
 				}
 				L.log(0, "Image saved : %s\n", dst);
