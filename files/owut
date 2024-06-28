@@ -172,6 +172,9 @@ let packages = {  // Dictionary of package lists.
 	default:   [], // Another simple name list.
         available: {}, // The name:version pairs that are available for installation.
 	changes:   {}, // Changes extracted from overview; structure documented in apply_pkg_mods.
+
+	// Logging of modifications
+	replaced:  {}, // Log of replacements and removals due to 'package_changes'.
 };
 
 //------------------------------------------------------------------------------
@@ -673,15 +676,16 @@ function apply_pkg_mods()
 	for (let chg in packages.changes) {
 		if (chg.revision <= rev_num) {
 			if (chg.target) {
-				if (! replace_package(chg.source, chg.target)) {
+				if (is_installed(chg.source))
+					packages.replaced[chg.source] = chg.target;
+				if (! replace_package(chg.source, chg.target))
 					errors++;
-				}
 			}
 			else if (is_installed(chg.source)) {
 				// No target, only source, so remove it.
-				if (! remove_package(chg.source)) {
+				packages.replaced[chg.source] = null;
+				if (! remove_package(chg.source))
 					errors++;
-				}
 			}
 		}
 	}
@@ -1216,6 +1220,16 @@ function check_updates()
 	else {
 		L.log(0, "  All packages are up-to-date.\n");
 	}
+
+	if (length(packages.replaced)) {
+		L.log(0, "\nAutomatic package replacements/removals:\n");
+		let f0 =`  %-${w0}s  %s\n`;
+		for (let chg, to in sort(packages.replaced)) {
+			to = to ? `replaced by ${to}` : "removed";
+			L.log(0, f0, chg, to);
+		}
+	}
+
 	L.log(0, "\n");
 
 	return { missing, changes };
