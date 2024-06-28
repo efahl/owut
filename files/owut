@@ -558,6 +558,29 @@ const SrcType = {
 	DEFAULT_ONLY: 2,
 };
 
+function what_provides(pkg)
+{
+	// Attempt to find the package provider, if it exists.  This is a
+	// hacky workaround for https://github.com/efahl/owut/issues/10, see
+	// that issue for current progress towards a proper solution.
+	let result;
+
+	result = ubus.raw_run("opkg", "whatprovides", pkg);
+	if (result) {
+                let m = match(trim(result.stdout), /What provides.*\n *(.*)/);
+		if (m) return m[-1];
+	}
+
+	result = ubus.raw_run("apk", "list", "--installed", "--providers", pkg);
+	if (result) {
+		// <dnsmasq> dnsmasq-2.90-r3 x86_64 {dnsmasq} (GPL-2.0-or-later)
+		let m = match(result.stdout, /\{([^{]*)\}/);
+		if (m) return m[-1];
+
+	}
+	return null;
+}
+
 function top_level(src_type)
 {
 	// Return only the installed top level packages, i.e., those upon which
@@ -1243,10 +1266,8 @@ function check_defaults()
 
 	let changes = {};
 	for (let pkg in packages.default) {
-		// Without 'what_provides' from the package manager, we can no
-		// longer tell what is replaced-by...
 		if (! is_installed(pkg)) {
-			changes[pkg] = L.colorize(L.YELLOW, "not installed, possibly replaced by another package");
+			changes[pkg] = what_provides(pkg) ?? L.colorize(L.YELLOW, "not installed");
 		}
 	}
 
