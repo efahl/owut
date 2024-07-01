@@ -884,7 +884,7 @@ function collect_device_info()
 	let target   = sysb.release.target;
 	let platform = sysb.board_name;
 	let ver_from = sysb.release.version;
-	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade
+	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade (or trx or lxl or ???)
 
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
@@ -979,8 +979,8 @@ function complete_build_info(profile, board)
 	// 'collect_device_info' (look for "sdcard" there).
 	let valid_sutypes = uniq(sort(map(profile.images, (img) => img.type)));
 	if (! (device.sutype in valid_sutypes)) {
-		if (device.sutype == "sysupgrade" && "sdcard" in valid_sutypes) {
-			device.sutype = "sdcard";
+		if (device.sutype == "sysupgrade" && length(valid_sutypes) == 1) {
+			device.sutype = valid_sutypes[0];
 		}
 		else {
 			L.die("sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
