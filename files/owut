@@ -1345,6 +1345,32 @@ function check_pkg_builds()
 	return ! failed;
 }
 
+function check_init_script()
+{
+	// If 
+	//   1) the user has an immutable image, and
+	//   2) that image contains an ASU generated custom defaults file, and
+	//   3) the user has not mentioned or overridden it,
+	// then warn them and have them read the documentation.
+
+	const asu_defaults = "/rom/etc/uci-defaults/99-asu-defaults";
+	if (options.init_script) {
+		if (options.init_script != "-" && ! fs.access(options.init_script)) {
+			L.err("The specified init-script '%s' does not exist\n", options.init_script);
+			return false;
+		}
+	}
+	else if (fs.access(asu_defaults)) {
+		L.wrn("You have a custom uci-defaults script at\n  %s\n" +
+			"and have not referenced it with the 'init-script' option.  " +
+			"Please read:\n" +
+			"  https://openwrt.org/docs/guide-user/installation/sysupgrade.owut#using_a_uci-defaults_script\n\n",
+			asu_defaults
+		);
+	}
+	return true;
+}
+
 function blob(report)
 {
 	// Exclude default packages unless explicitly listed in 'packages'.  When
@@ -1686,6 +1712,7 @@ switch (options.command) {
 		updates = check_updates();
 		check_defaults();
 		errors = ! check_pkg_builds() || updates.missing;
+		check_init_script();
 		if (errors) 
 			L.err("Checks reveal errors, do not upgrade\n");
 		else {
@@ -1698,6 +1725,7 @@ switch (options.command) {
 
 	case "blob":
 		collect_all();
+		check_init_script();
 		show_blob();
 		break;
 
@@ -1723,6 +1751,7 @@ switch (options.command) {
 				break;
 			}
 		}
+		check_init_script();
 		if (download() && options.command == "upgrade") {
 			install();
 		}
