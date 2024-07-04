@@ -74,7 +74,9 @@ const Logger = {
 	},
 	bug: function(fmt, ...args) {
 		// Variant for errors indicating code issue, not a user error.
-		this.die(fmt + "Please report at https://github.com/efahl/owut/issues\n", ...args);
+		fmt += "This is likely a bug, please report at\n" +
+		       "  https://github.com/efahl/owut/issues\n";
+		this.die(fmt, ...args);
 	},
 };
 
@@ -137,7 +139,6 @@ let build;    // See collect_all for next three
 let device; 
 let release;
 
-
 // Temporary and resource files.
 // We save them all with reasonably recognizable names to aid in debugging.
 let tmp_root = "/tmp/owut-";
@@ -159,7 +160,6 @@ let tmp = {
 	firmware_sums:      `${img_root}.sha256sums`,          // Expected sha256sums from downloaded firmware.
 	firmware_man:       `${img_root}-manifest.json`,       // Manifest of successful build.
 };
-
 
 let packageDB = {};      // Dictionary of installed packages and much status.
 
@@ -432,7 +432,7 @@ function dl_package_versions()
 
 	let arch = dl_json(url.pkg_arch, tmp.pkg_arch_json, true);
 	let plat = dl_json(url.pkg_plat, tmp.pkg_platform_json, true);
-	return { ...(arch ?? []), ...(plat?.packages ?? []) };
+	return sort({ ...(arch ?? []), ...(plat?.packages ?? []) });
 }
 
 function dl_build(config)
@@ -610,12 +610,17 @@ function removed_defaults()
 	return filter(packages.default, (p) => ! is_installed(p));
 }
 
-function add_package(pkg)
+function add_package(pkg, force)
 {
+	// 'force' is used during package_changes processing to ensure that
+	// the replacement is added, irrespective of availability (e.g., a
+	// broken build for the package being added would otherwise fail).
+
 	if (is_installed(pkg)) {
 		return true;
 	}
-	if (! is_available(pkg)) {
+
+	if (! force && ! is_available(pkg)) {
 		L.err("Package '%s' is not available on this platform\n", pkg);
 		return false;
 	}
@@ -657,7 +662,7 @@ function replace_package(old_pkg, new_pkg)
 
 	if (is_installed(old_pkg)) {
 		remove_package(old_pkg, true);
-		return add_package(new_pkg);
+		return add_package(new_pkg, true);
 	}
 	return true;
 }
@@ -1213,7 +1218,7 @@ function check_updates()
 
 		let old = data.version;
 		let new = data.new_version;
-		if (old == new) continue;
+		if (old == new && old != null) continue;
 
 		changes++;
 		let c1 = "";
@@ -1251,6 +1256,7 @@ function check_updates()
 			to = to ? `replaced by ${to}` : "removed";
 			L.log(0, f0, chg, to);
 		}
+		L.log(0, "Details at %s\n", url.overview);
 	}
 
 	L.log(0, "\n");
