@@ -1265,6 +1265,18 @@ function check_updates()
 	return { missing, changes };
 }
 
+function check_missing()
+{
+	// Mostly silent check for missing packages.  Used when generating a
+	// package list for external uses, 'list' or 'blob'.
+	L.push(-1);
+	let updates = check_updates();
+	L.pop();
+	if (updates.missing) {
+		L.err("There are %s missing packages in the build package list, run 'owut check'\n", updates.missing);
+	}
+}
+
 function check_defaults()
 {
 	// Scan the package defaults to see if they are
@@ -1711,6 +1723,7 @@ switch (options.command) {
 	case "list":
 		collect_all();
 		list();
+		check_missing();
 		break;
 
 	case "check":
@@ -1734,6 +1747,7 @@ switch (options.command) {
 		collect_all();
 		check_init_script();
 		show_blob();
+		check_missing();
 		break;
 
 	case "download":
