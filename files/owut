@@ -23,16 +23,13 @@ const default_upstream   = "https://downloads.openwrt.org";
 
 //------------------------------------------------------------------------------
 
-function _exit(status)
-{
-	fs.stdout.flush();
-	fs.stderr.flush();
-	exit(status);
-}
-
 const Logger = {
+	_levels: [],
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
+	push: function(new) { push(this._levels, this._level); this._level = new; },
+	pop: function() { this._level = pop(this._levels); },
+
 	output_is_pipe: ! fs.stdout.isatty(),
 
 	GREEN:  "0;255;0",
@@ -56,8 +53,7 @@ const Logger = {
 
 	_out: function(prefix, clr, fmt, ...args)
 	{
-		printf("%s: ", this.colorize(clr, prefix));
-		printf(fmt, ...args);
+		warn(sprintf("%s: ", this.colorize(clr, prefix)), sprintf(fmt, ...args));
 	},
 
 	err: function(fmt, ...args) { this._out("ERROR",   this.RED,    fmt, ...args); },
@@ -65,12 +61,15 @@ const Logger = {
 
 	log: function(level, fmt, ...args)
 	{
-		if (this._level >= level) printf(fmt, ...args);
+		if (this._level >= level) {
+			printf(fmt, ...args);
+			fs.stdout.flush();
+		}
 	},
 
 	die: function(fmt, ...args) {
 		this.err(fmt, ...args);
-		_exit(1);
+		exit(1);
 	},
 	bug: function(fmt, ...args) {
 		// Variant for errors indicating code issue, not a user error.
@@ -381,7 +380,7 @@ function dl_json(url, json_file, keep_going)
 		return read_tmp_json(json_file);
 	}
 	L.err("Response status %s while downloading\n  %s\n", rsp?.status, url);
-	return keep_going ? null : _exit(1);
+	return keep_going ? null : exit(1);
 }
 
 function dl_platform()
@@ -953,7 +952,7 @@ function collect_build_info()
 	if (! (ver_to_branch in release.branches) ||
 	    ! (ver_to        in release.branches[ver_to_branch].versions)) {
 		show_versions(true);
-		_exit(1);
+		exit(1);
 	}
 
 	let fstype = options.fstype || device.fstype;
@@ -977,19 +976,17 @@ function complete_build_info(profile, board)
 
 	let valid_fstypes = uniq(sort(map(profile.images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
-		L.die("file system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
+		L.die("File system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
 	}
 
 	// Here is where we fix our guess for 'sutype' made above in
 	// 'collect_device_info' (look for "sdcard" there).
 	let valid_sutypes = uniq(sort(map(profile.images, (img) => img.type)));
 	if (! (device.sutype in valid_sutypes)) {
-		if (device.sutype == "sysupgrade" && length(valid_sutypes) == 1) {
+		if (device.sutype == "sysupgrade" && length(valid_sutypes) == 1)
 			device.sutype = valid_sutypes[0];
-		}
-		else {
-			L.die("sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
-		}
+		else
+			L.bug("Sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
 	}
 
 	for (let img in profile.images) {
@@ -1066,7 +1063,7 @@ function collect_overview()
 		// (i.e., ASU server will build a lot more than is shown) and
 		// we catch that when trying to fetch board_json below.
 		show_versions(true);
-		_exit(1);
+		exit(1);
 	}
 
 	release.dir      = replace(active_branch.path, "{version}", build.to.version);
@@ -1780,4 +1777,4 @@ switch (options.command) {
 
 uloop.done();
 ubus.term();
-_exit();
+exit();
