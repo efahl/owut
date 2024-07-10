@@ -274,6 +274,7 @@ function _request(url, dst_file, json_blob)
 	//   dst_file  = result of request
 	//   json_blob = optional POST data, GET used if null
 
+	let start = time();
 	let uc;
 	let rsp_headers;
 
@@ -336,7 +337,9 @@ function _request(url, dst_file, json_blob)
 	uloop.run();
 
 	if (rsp_headers) {
-		L.log(1, "Downloaded %s to %s\n", url, dst_file);
+		let elapsed = (time() - start) || 0.5;
+		let kbytes  = (fs.stat(dst_file).size / 1024) || 1;
+		L.log(1, "Downloaded %s to %s (%d KiB/sec)\n", url, dst_file, kbytes/elapsed);
 		L.log(2, "Response headers = %.2J\n", rsp_headers);
 
 		if (options.keep) {
