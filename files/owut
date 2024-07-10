@@ -1190,8 +1190,8 @@ function show_config()
 		`Build-FS-type  ${build.to.fstype}\n`
 		`Build-at       ${build.to.date}\n`
 		`Image-prefix   ${build.to.img_prefix}\n`
+		`Image-URL      ${url.download}\n`
 		`Image-file     ${build.to.img_file}\n`
-		`Image-URL      ${url.download}/${build.to.img_file}\n`
 	);
 	L.log(0, "Installed      %3d packages\n", length(packageDB));
 	L.log(0, "Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
