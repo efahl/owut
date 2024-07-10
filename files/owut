@@ -30,25 +30,26 @@ const Logger = {
 	push: function(new) { push(this._levels, this._level); this._level = new; },
 	pop: function() { this._level = pop(this._levels); },
 
-	output_is_pipe: ! fs.stdout.isatty(),
+	stdout_is_pipe: ! fs.stdout.isatty(),
 
 	GREEN:  "0;255;0",
 	YELLOW: "255;234;0",
 	RED:    "255;0;0",
+	reset:  "reset",
 
 	color: function(color_name)
 	{
 		// Suppress colorization when stdout is a pipe.
-		if (this.output_is_pipe)
+		if (this.stdout_is_pipe)
 			return "";
-		return color_name == "reset" ? "\033[m" : `\033[38;2;${color_name}m`;
+		return color_name == this.reset ? "\033[m" : `\033[38;2;${color_name}m`;
 	},
 
 	colorize: function(color_name, text)
 	{
-		if (this.output_is_pipe)
+		if (this.stdout_is_pipe)
 			return text;
-		return this.color(color_name) + text + this.color("reset");
+		return this.color(color_name) + text + this.color(this.reset);
 	},
 
 	_out: function(prefix, clr, fmt, ...args)
@@ -1233,7 +1234,7 @@ function check_updates()
 		else {
 			c2  = L.color(pkg_ver_older(old, new) ? L.GREEN : L.YELLOW);
 		}
-		L.log(0, f0, pkg, c1, old, c2, new, L.color("reset"));
+		L.log(0, f0, pkg, c1, old, c2, new, L.color(L.reset));
 	}
 
 	if (missing) {
