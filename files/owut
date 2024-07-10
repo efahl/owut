@@ -1122,7 +1122,7 @@ function collect_all()
 
 	build.to.kver = "unknown";
 	for (let pkg, data in packageDB) {
-		if (data.new_version && index(pkg, "kmod-") == 0) {
+		if (data.new_version && index(pkg, "kmod-") == 0 && is_default(pkg)) {
 			build.to.kver = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
 			break;
 		}
