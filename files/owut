@@ -136,7 +136,7 @@ L.set_level(options.verbosity);
 
 let url;      // See initialize_urls
 let build;    // See collect_all for next three
-let device; 
+let device;
 let release;
 
 // Temporary and resource files.
@@ -162,6 +162,7 @@ let tmp = {
 };
 
 let packageDB = {};      // Dictionary of installed packages and much status.
+let pkg_name_len = 0;
 
 let packages = {  // Dictionary of package lists.
 	// Collected from this device.
@@ -170,7 +171,7 @@ let packages = {  // Dictionary of package lists.
 
 	// Collected from upgrade servers based on to-version.
 	default:   [], // Another simple name list.
-        available: {}, // The name:version pairs that are available for installation.
+	available: {}, // The name:version pairs that are available for installation.
 	changes:   {}, // Changes extracted from overview; structure documented in apply_pkg_mods.
 
 	// Logging of modifications
@@ -260,7 +261,7 @@ function sysupgrade(file, check, options)
 	// of '10', so uc_ubus_call raises an error.  '--test' is fine, it
 	// returns proper status.
 
-	return check 
+	return check
 		? ubus.run("sysupgrade", ...options, file)
 		: ubus.raw_run("sysupgrade", ...(options ?? []), file);
 }
@@ -570,7 +571,7 @@ function what_provides(pkg)
 
 	result = ubus.raw_run("opkg", "whatprovides", pkg);
 	if (result) {
-                let m = match(trim(result.stdout), /What provides.*\n *(.*)/);
+		let m = match(trim(result.stdout), /What provides.*\n *(.*)/);
 		if (m) return m[-1];
 	}
 
@@ -1127,6 +1128,8 @@ function collect_all()
 			break;
 		}
 	}
+
+	pkg_name_len = max(...map(keys(packageDB), length), ...map(packages.default, length));
 }
 
 //------------------------------------------------------------------------------
@@ -1179,7 +1182,7 @@ function show_config()
 {
 	// Pretty-print the major configuration values.
 	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
-	L.log(0, 
+	L.log(0,
 		`Board-name     ${device.platform}\n`
 		`Target         ${device.target}\n`
 		`Root-FS-type   ${device.fstype}\n`
@@ -1210,7 +1213,7 @@ function check_updates()
 	let missing = 0;
 
 	L.log(0, "Package version changes:\n");
-	let w0 = max(...map(keys(packageDB), length));
+	let w0 = pkg_name_len + 2;
 	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let new = '';
@@ -1251,11 +1254,11 @@ function check_updates()
 	}
 
 	if (length(packages.replaced)) {
-		L.log(0, "\nAutomatic package replacements/removals:\n");
 		let f0 =`  %-${w0}s  %s\n`;
+		L.log(0, "\nAutomatic package replacements/removals:\n");
+		L.log(0, f0, "Package", "Replaced-by");
 		for (let chg, to in sort(packages.replaced)) {
-			to = to ? `replaced by ${to}` : "removed";
-			L.log(0, f0, chg, to);
+			L.log(0, f0, chg, to ?? L.colorize(L.YELLOW, "removed"));
 		}
 		L.log(0, "Details at %s\n", url.overview);
 	}
@@ -1295,8 +1298,8 @@ function check_defaults()
 		L.log(0, "  No missing or modified default packages.\n\n");
 	}
 	else {
-		let wid = max(...map(keys(changes), (f) => length(f)));
-		let fmt = `  %-${wid}s   %s\n`;
+		let wid = pkg_name_len + 2;
+		let fmt = `  %-${wid}s  %s\n`;
 		L.log(0, fmt, "Default", "Provided-by");
 		for (let p, a in changes) {
 			L.log(0, fmt, p, a);
@@ -1336,8 +1339,7 @@ function check_pkg_builds()
 			html_blob = dl_failures(feed);
 			if (html_blob) {
 				let fails = match(html_blob, info);
-				let w0    = max(...map(fails, (f) => max(25, length(f[1])) ));
-				let fmt   = `    %-${w0}s  %s - %s\n`;
+				let fmt   = `    %-${pkg_name_len}s  %s - %s\n`;
 
 				for (let fail in fails) {
 					let pkg  = fail[1];
@@ -1366,7 +1368,7 @@ function check_pkg_builds()
 
 function check_init_script()
 {
-	// If 
+	// If
 	//   1) the user has an immutable image, and
 	//   2) that image contains an ASU generated custom defaults file, and
 	//   3) the user has not mentioned or overridden it,
@@ -1733,7 +1735,7 @@ switch (options.command) {
 		check_defaults();
 		errors = ! check_pkg_builds() || updates.missing;
 		check_init_script();
-		if (errors) 
+		if (errors)
 			L.err("Checks reveal errors, do not upgrade\n");
 		else {
 			L.log(0, updates.changes == 0
