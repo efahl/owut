@@ -565,17 +565,22 @@ function pkg_ver_cmp(old, new, strict)
 	return 0;
 }
 
+function _vmangle(v)
+{
+	v = replace(v, "-SNAPSHOT", ".999");
+	v = replace(v, "SNAPSHOT",  "999");
+	v = replace(v, "-rc", "-r");
+	if (substr(v, -2) == ".0") v += "-r999"; // After the -rcN
+	return v;
+}
+
 function version_cmp(v1, v2)
 {
 	// Compare two versions and return cmp value based on their relative
 	// ordering.  We want to make sure RCs are before any release, and
 	// SNAPSHOTs are after, hence the string mangling.
 
-	v1 = replace(v1, '-SNAP', '.99');
-	v1 = replace(v1, 'SNAP',  '99');
-	v2 = replace(v2, '-SNAP', '.99');
-	v2 = replace(v2, 'SNAP',  '99');
-	return pkg_ver_cmp(v1, v2);
+	return pkg_ver_cmp(_vmangle(v1), _vmangle(v2));
 }
 
 function version_older(new_version, base_version)
@@ -584,6 +589,8 @@ function version_older(new_version, base_version)
 	// if the user is attempting to downgrade their installation.
 	//
 	//   version_older('23.05.2', 'SNAPSHOT') -> true
+	//   version_older('23.05-SNAPSHOT', 'SNAPSHOT') -> true
+	//   version_older('23.05.0', '23.05.0-rc1') -> false
 
 	return version_cmp(new_version, base_version) < 0;
 }
