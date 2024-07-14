@@ -74,9 +74,10 @@ const Logger = {
 	},
 	bug: function(fmt, ...args) {
 		// Variant for errors indicating code issue, not a user error.
-		fmt += "This is likely a bug, please report at\n" +
-		       "  https://github.com/efahl/owut/issues\n";
-		this.die(fmt, ...args);
+		this.err(fmt, ...args);
+		assert(false,
+		   `This is a bug in '${PROG}', please report at\n` +
+		   "  https://github.com/efahl/owut/issues\n");
 	},
 };
 
@@ -109,7 +110,7 @@ let arg_defs = proto([
 	{ name: "version_to",  short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
-	{ name: "force",                    long: "--force",       action: "set",                 default: false, help: "Force download when there are no changes detected." },
+	{ name: "force",                    long: "--force",       action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
 	{ name: "add",         short: "-a", long: "--add",         action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
 	{ name: "remove",      short: "-r", long: "--remove",      action: "store",     nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
 	{ name: "init_script", short: "-I", long: "--init-script", action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
@@ -458,33 +459,110 @@ function dl_build_status()
 
 //------------------------------------------------------------------------------
 
-function numstr(s) {
-	// Attempt conversion, if NaN return original string.
+function to_int(s)
+{
+	// Must be an int or there's a bug in caller.
+	if (! match(s, /^[0-9]+$/)) L.bug("invalid int '%s'\n", s);
+	return int(s);
+}
+
+function ck_int(s)
+{
+	// If empty, NaN or not fully converted, return null.
+	if (! s) return null;
+	s = ltrim(s, "0") || "0";
 	let n = int(s);
-	return n == n ? n : s;
+	return n == s ? n : null;
 }
 
-const ver_bits = regexp('[^a-z0-9]', 'i');
-function pkg_ver_cmp(old, new)
+const standard = regexp("^([0-9.]+)(~([0-9a-f]+)){0,1}(-r([0-9]+)){0,1}$", "i");
+const pre_bits = regexp("^[-a-z.]+",          "i");
+const ver_bits = regexp("^[0-9.]+",           "i"); 
+const ver_splt = regexp("[^a-z0-9]",          "i");
+const rev_bits = regexp("-[r]{0,1}([0-9]+)$", "i");
+
+function version_parse(version)
 {
-	let v1 = split(lc(old), ver_bits);
-	let v2 = split(lc(new), ver_bits);
-	for (let i, n1 in v1) {
-		let n2 = v2[i];
-		if (n1 != n2) {
-			n1 = numstr(n1);
-			n2 = numstr(n2);
-			if (n1 < n2) return -1;
-			if (n1 > n2) return  1;
-		}
+	// Two forms are parsed incorrectly:
+	//   1) Those with all dashes '-', no hash and no rev.  The final number
+	//      is interpreted as the rev number:
+	//        ct-bugcheck: 2016-07-21
+	//        ver=[2016, 7], hsh=null, rev=21
+	//   2) Those starting with a hash, and the initial digits are decimal:
+	//        open-plc-utils: 1ba7d5a0-6
+	//        ver=[1], hsh="ba7d5a0", rev=6
+	//
+	// #1 is only aesthetic and ends up working fine; #2 was fixed in
+	// the apk version cleanup and only appears in 23.05 and earlier.
+
+	let ver, hsh, rev;
+
+	let parts = match(version, standard);
+	if (parts) {
+		// Standard n.n.n~h-rn sequences with optional hash and rev.
+		ver = map(split(parts[1], ver_splt), to_int);
+		hsh = parts[3];
+		rev = ck_int(parts[5]);
 	}
-	return 0;
+	else {
+		// Some odd ones:
+		// luasoap: 2014-08-21-raf1e100281cee4b972df10121e37e51d53367a98
+		// luci-app-advanced-reboot: 1.0.1-11-1
+
+		if (parts = match(version, pre_bits)) {
+			// adb:                android.5.0.2_r1-r3
+			// libinih:            r58-r1
+			// luci-app-dockerman: v0.5.13-20240317-1
+			// luci-mod-status:    git-24.141.29354-5cfe7a7 (23.05)
+			version = substr(version, length(parts[0]));
+		}
+
+		if (rev = match(version, rev_bits)) {
+			// Extract and strip rev number from version, in case
+			// it's one of those with lots of dashes.
+			version = substr(version, 0, -length(rev[0]));
+			rev     = to_int(rev[1]);
+		}
+
+		if (ver = match(version, ver_bits)) {
+			version = substr(version, length(ver[0]));
+			ver     = map(split(rtrim(ver[0], "."), ver_splt), to_int);
+		}
+
+		if (length(ver) == 1 && index(version, "-") == 0) {
+			// pservice: 2017-08-29-r3
+			for (let ns in split(substr(version, 1), /[-.]/)) {
+				let n = ck_int(ns);
+				if (n == null) break;
+				push(ver, n);
+				version = substr(version, length(ns)+1);
+			}
+		}
+
+		// Anything left over must be the "hash" (if we can call it that).
+		hsh = version || null;
+		if (index(hsh, "-") == 0) hsh = substr(hsh, 1);
+	}
+
+	return { ver, hsh, rev };
 }
 
-function pkg_ver_older(v1, v2)
+function pkg_ver_cmp(old, new, strict)
 {
-	// Is v1 and older version than v2?
-	return pkg_ver_cmp(v1, v2) < 0;
+	if (old == null) return -2;
+	if (new == null) return  2;
+	let v1 = version_parse(old);
+	let v2 = version_parse(new);
+	for (let i, n1 in v1.ver) {
+		let n2 = v2.ver[i];
+		if (n1 < n2) return -1;
+		if (n1 > n2) return  1;
+	}
+	if (v1.rev < v2.rev) return -1;
+	if (v1.rev > v2.rev) return  1;
+	// Ignore the hashes unless we're being strict
+	if (strict && v1.hsh != v2.hsh) return 99; // 99 means "I don't know"
+	return 0;
 }
 
 function version_cmp(v1, v2)
@@ -1209,8 +1287,9 @@ function check_updates()
 	// packages and the number of missing packages that would cause a
 	// build failure.
 
-	let changes = 0;
-	let missing = 0;
+	let changes    = 0;
+	let missing    = 0;
+	let downgrades = 0;
 
 	L.log(0, "Package version changes:\n");
 	let w0 = pkg_name_len + 2;
@@ -1222,23 +1301,39 @@ function check_updates()
 
 		let old = data.version;
 		let new = data.new_version;
-		if (old == new && old != null) continue;
+		if (old == new) continue;
+		let cmp = pkg_ver_cmp(old, new, true);
+		if (cmp == 0) continue;
 
 		changes++;
 		let c1 = "";
 		let c2 = "";
-		if (old == null) {
-			// This happens when you '--add' a new package.
-			c1  = L.color(L.YELLOW);
-			old = "not-installed";
-		}
-		if (new == null) {
-			missing++;
-			c2  = L.color(L.RED);
-			new = "missing to-version";
-		}
-		else {
-			c2  = L.color(pkg_ver_older(old, new) ? L.GREEN : L.YELLOW);
+		switch (cmp) {
+			case -2: // Old is null.
+				// This happens when you '--add' a new package.
+				c1  = L.color(L.YELLOW);
+				old = "not-installed";
+				// fallthrough
+			case -1:
+				c2 = L.color(L.GREEN);
+				break;
+
+			case  1:
+				downgrades++;
+				c2 = L.color(L.RED);
+				break;
+
+			case  2: // New is null.
+				missing++;
+				c2  = L.color(L.RED);
+				new = "missing to-version";
+				break;
+
+			case 99:
+				// They are different (hashes usually), but we
+				// can't tell if one is older than the other.
+				c2 = L.color(L.YELLOW);
+				break;
 		}
 		L.log(0, f0, pkg, c1, old, c2, new, L.color(L.reset));
 	}
@@ -1246,11 +1341,14 @@ function check_updates()
 	if (missing) {
 		L.log(0, "%d packages missing in target version, %s\n", missing, L.colorize(L.RED, "cannot upgrade"));
 	}
+	if (downgrades) {
+		L.log(0, "%d packages were downgraded\n", downgrades);
+	}
 	if (changes) {
-		L.log(0, "%d packages are out-of-date.\n", changes);
+		L.log(0, "%d packages are out-of-date\n", changes);
 	}
 	else {
-		L.log(0, "  All packages are up-to-date.\n");
+		L.log(0, "All packages are up-to-date\n");
 	}
 
 	if (length(packages.replaced)) {
@@ -1265,7 +1363,7 @@ function check_updates()
 
 	L.log(0, "\n");
 
-	return { missing, changes };
+	return { missing, changes, downgrades };
 }
 
 function check_missing()
@@ -1757,6 +1855,10 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		updates = check_updates();
+		if (updates.downgrades && ! options.force) {
+			L.err("Update checks reveal package downgrades, re-run with '--force' to proceed\n");
+			break;
+		}
 		if (updates.missing) {
 			L.err("Update checks reveal errors, can't proceed\n");
 			break;
