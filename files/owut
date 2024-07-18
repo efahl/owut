@@ -1238,8 +1238,8 @@ function dump()
 	L.log(0, '"build": %.2J,\n', build);
 	L.log(0, '"device": %.2J,\n', device);
 	L.log(0, '"release": %.2J,\n', release);
-	L.log(1, '"packages": %.2J,\n', packages);
 	L.log(1, '"packageDB": %.2J,\n', packageDB);
+	L.log(2, '"packages": %.2J,\n', packages);
 	L.log(0, '}\n');
 }
 
