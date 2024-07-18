@@ -123,7 +123,7 @@ let arg_defs = proto([
 	{ name: "image",       short: "-i", long: "--image",       action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",      short: "-f", long: "--format",      action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 
-	{ name: "_device",                  long:"--device",       action: "store",     nargs: 1, default: null }, // Undocumented: For testing foreign devices.
+	{ name: "device",                   long: "--device",      action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
@@ -972,14 +972,14 @@ function collect_device_info()
 	let sysb = ubus.call("system", "board");
 
 	let efi_check = "check";  // one of: force, no, check
-	if (options._device) {
+	if (options.device) {
 		// Allow test cases (or "cross" downloads?), using undocumented
 		// option.  tegra is one with 'sdcard' sutype, use as follows:
 		//   owut ... --device tegra/generic:compulab_trimslice:squashfs
-		let bv = split(options._device, ":");
+		let bv = split(options.device, ":");
 		sysb.release.target = bv[0];
 		sysb.board_name     = bv[1];
-		sysb.rootfs_type    = bv[2];
+		sysb.rootfs_type    = bv[2] || "squashfs";
 		efi_check           = bv[3] || "no";  // Default to no, if unspecified.
 	}
 
