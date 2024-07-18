@@ -21,6 +21,10 @@ let uci = cursor();
 const default_sysupgrade = "https://sysupgrade.openwrt.org";
 const default_upstream   = "https://downloads.openwrt.org";
 
+const issue_url = "https://github.com/efahl/owut/issues";
+const forum_url = "https://forum.openwrt.org/t/owut-openwrt-upgrade-tool/200035";
+const wiki_url  = "https://openwrt.org/docs/guide-user/installation/sysupgrade.owut";
+
 //------------------------------------------------------------------------------
 
 const Logger = {
@@ -76,8 +80,8 @@ const Logger = {
 		// Variant for errors indicating code issue, not a user error.
 		this.err(fmt, ...args);
 		assert(false,
-		   `This is a bug in '${PROG}', please report at\n` +
-		   "  https://github.com/efahl/owut/issues\n");
+		   `This is a bug in '${PROG}', please report at\n`
+		   `  ${issue_url}\n`);
 	},
 };
 
@@ -124,9 +128,13 @@ let arg_defs = proto([
 
 arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
 arg_defs.set_bookends(
-	"\nowut is an upgrade tool for OpenWrt.  Full docs at\n" +
-	"  https://openwrt.org/docs/guide-user/installation/sysupgrade.owut\n",
-	"\nThank you!  Come again!\n"
+	"\nowut is an upgrade tool for OpenWrt.\n",
+	`\nFull documentation\n`
+	`  ${wiki_url}\n\n`
+	`Questions and discussion\n`
+	`  ${forum_url}\n\n`
+	`Issues and bug reports\n`
+        `  ${issue_url}\n\n`
 );
 
 let options = arg_defs.parse(null, {attendedsysupgrade: "owut"});
@@ -1268,8 +1276,8 @@ function show_config()
 	// Pretty-print the major configuration values.
 	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
 	L.log(0,
-		`Board-name     ${device.platform}\n`
 		`Target         ${device.target}\n`
+		`Profile        ${device.platform}\n`
 		`Root-FS-type   ${device.fstype}\n`
 		`Sys-type       ${device.sutype}\n`
 		`Package-arch   ${device.arch}\n`
@@ -1487,11 +1495,11 @@ function check_init_script()
 		}
 	}
 	else if (fs.access(asu_defaults)) {
-		L.wrn("You have a custom uci-defaults script at\n  %s\n" +
-			"and have not referenced it with the 'init-script' option.  " +
-			"Please read:\n" +
-			"  https://openwrt.org/docs/guide-user/installation/sysupgrade.owut#using_a_uci-defaults_script\n\n",
-			asu_defaults
+		L.wrn(`You have a custom uci-defaults script at\n`
+			`  ${asu_defaults}\n`
+			`and have not referenced it with the 'init-script' option.\n`
+			`Please read:\n`
+			`  ${wiki_url}#using_a_uci-defaults_script\n\n`
 		);
 	}
 	return true;
