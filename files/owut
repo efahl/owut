@@ -1103,6 +1103,8 @@ function collect_overview()
 	url.upstream = overview.upstream_url ?? default_upstream;
 	url.versions = `${url.upstream}/.versions.json`;
 
+	let bad_releases = [ "23.05.1", ];
+
 	release = {
 		branch:   null, // Release branch name: "SNAPSHOT" or "21.07" or "23.05"
 		dir:      null, // ASU and DL server release branch directory: "snapshots" or "release/23.05.0"
@@ -1112,11 +1114,9 @@ function collect_overview()
 	for (let branch_id, data in overview.branches) {
 		release.branches[branch_id] = {
 			latest:   null,  // Determined below.
-			versions: data.versions,
+			versions: filter(data.versions, (v) => !(v in bad_releases)),
 		};
 	}
-
-	let bad_releases = [ "23.05.1", ];
 
 	let versions = dl_versions();
 	for (let version in versions.versions_list) {
