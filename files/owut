@@ -122,6 +122,7 @@ let arg_defs = proto([
 	{ name: "rootfs_size", short: "-S", long: "--rootfs-size", action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `Root file system size in MB (${_fslo}-${_fshi}).` },
 	{ name: "image",       short: "-i", long: "--image",       action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",      short: "-f", long: "--format",      action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
+	{ name: "pre_install", short: "-p", long: "--pre-install", action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
 
 	{ name: "device",                   long: "--device",      action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
@@ -1802,11 +1803,33 @@ function download()
 	return false;
 }
 
+function run_pre_install_hook()
+{
+	// Execute a user program just prior to doing the final installation.
+
+	if (options.pre_install) {
+		if (! fs.access(options.pre_install))
+			L.die(`Cannot access pre-install script '${options.pre_install}', aborting upgrade\n`);
+
+		L.log(0, "Executing pre-install script '%s'...\n", options.pre_install);
+
+		let result = ubus.run(options.pre_install);
+
+		if (result?.stdout) L.log(0, result.stdout);
+		if (result?.stderr) L.log(0, result.stderr);
+		if (result.code != 0)
+			L.die(`Pre-install script '${options.pre_install}' failed with status ${result.code}, aborting upgrade\n`);
+		L.log(0, "Pre-install script terminated, proceeding with upgrade\n");
+	}
+}
+
 function install()
 {
 	// Run sysupgrade to install the image.
 	// Probably need some more options reflected from sysupgrade itself.
 	// '-n' = discard config comes to mind first, maybe '-f' = force, too.
+
+	run_pre_install_hook();  // Run user's pre-install hook.
 
 	sysupgrade(options.image, false);
 	L.log(0, "Installing %s and rebooting...\n", options.image);

@@ -20,6 +20,7 @@ config owut 'owut'
 #       option init_script '/root/data/my-init-script.sh'
 #       option image       '/tmp/my-firmware-img.bin'
 #       option rootfs_size  256
+#       option pre_install '/root/owut.d/pre-install.sh'
 
 CONF
 echo "Please see owut section of $conf_file for example options."
