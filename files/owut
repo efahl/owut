@@ -103,7 +103,7 @@ let commands = {
 };
 
 let _fstypes   = ["squashfs", "ext4", "ubifs", "jffs2"];
-let _fslo      = 1;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+let _fslo      = 1;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v1_build_post_api_v1_build_post
 let _fshi      = 1024;
 let _list_fmts = ["fs-user", "fs-all", "config"];
 
@@ -1098,6 +1098,9 @@ function complete_build_info(profile, board)
 
 function collect_overview()
 {
+	// When building the versions list, refer to
+	//   https://openwrt.org/docs/guide-developer/security#support_status
+
 	collect_device_info();
 
 	let overview = dl_overview();
@@ -1520,7 +1523,7 @@ function blob(report)
 
 	let init_script;
 	if (options.init_script) {
-		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/ui/#model-BuildRequest
+		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v1_build_post_api_v1_build_post
 		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
 			L.err("Init script file '%s' does not exist\n", options.init_script);
