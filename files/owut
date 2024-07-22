@@ -991,7 +991,8 @@ function collect_device_info()
 
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
-	if (match(target, /x86\//)) {  // This might be wrong, what about x86/geode - geos?
+	if (match(target, /^(x86|armsr)\/(.*)$/)) {
+		// I'm still unclear about target=x86/geode with platform=geos?
 		platform = "generic";
 		sutype   = "combined";
 	}
