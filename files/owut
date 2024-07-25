@@ -851,7 +851,7 @@ function collect_packages()
 	//     };
 
 	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
-	packages.installed = sort(installed.packages);
+	packages.installed = installed.packages;
 
 	let top_level = ubus.call("rpc-sys", "packagelist", { "all": false });
 	delete top_level.packages["kernel"]; // Not sure how they get here...
@@ -872,8 +872,6 @@ function collect_packages()
 	if (! apply_pkg_mods()) {
 		L.die("Errors collecting package data, terminating.\n");
 	}
-
-	packageDB = sort(packageDB);
 }
 
 //------------------------------------------------------------------------------
@@ -1237,15 +1235,19 @@ function collect_all()
 function dump()
 {
 	// Send forth a json representation of all the stuff we've collected.
+	let inst = sort(packages.installed);
+	let urls = sort(url);
+	let tmps = sort(tmp);
+	let pkgs = sort(packageDB);
 	L.log(0, '{\n');
 	L.log(0, '"version": "%s",\n', PROG);
 	L.log(0, '"options": %.2J,\n', options);
-	L.log(0, '"url": %.2J,\n', sort(url));
-	L.log(0, '"tmp": %.2J,\n', sort(tmp));
+	L.log(0, '"url": %.2J,\n', urls);
+	L.log(0, '"tmp": %.2J,\n', tmps);
 	L.log(0, '"build": %.2J,\n', build);
 	L.log(0, '"device": %.2J,\n', device);
 	L.log(0, '"release": %.2J,\n', release);
-	L.log(1, '"packageDB": %.2J,\n', packageDB);
+	L.log(1, '"packageDB": %.2J,\n', pkgs);
 	L.log(2, '"packages": %.2J,\n', packages);
 	L.log(0, '}\n');
 }
@@ -1259,7 +1261,7 @@ function list()
 		case "config":
 			packages = top_level(SrcType.USER_ONLY);
 			let ctype = "y"; // "y" to install, "m" just build package.
-			for (let pkg in packages) {
+			for (let pkg in sort(packages)) {
 				L.log(0, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
 			}
 			break;
@@ -1318,7 +1320,7 @@ function check_updates()
 	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let new = '';
-	for (let pkg, data in packageDB) {
+	for (let pkg, data in sort(packageDB)) {
 		if (pkg in [ "kernel", "libc" ]) continue; // They aren't in 'available'?
 
 		let old = data.version;
