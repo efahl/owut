@@ -1074,14 +1074,20 @@ function complete_build_info(profile, board)
 	build.to.rev_code   = board.version_code;
 	build.to.img_prefix = profile.image_prefix;
 
-	let valid_fstypes = uniq(sort(map(profile.images, (img) => img.filesystem)));
+	// First, only allow legitimate "sysupgrade" types through.
+	let images = filter(profile.images, (img) => img.filesystem && img.filesystem != "initramfs");
+
+	let valid_fstypes = uniq(sort(map(images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
 		L.die("File system type '%s' should be one of %s\n", build.to.fstype, valid_fstypes);
 	}
 
+	// Next, reduce candidate images to just those with desired fstype.
+	images = filter(images, (img) => img.filesystem == build.to.fstype);
+
 	// Here is where we fix our guess for 'sutype' made above in
 	// 'collect_device_info' (look for "sdcard" there).
-	let valid_sutypes = uniq(sort(map(profile.images, (img) => img.type)));
+	let valid_sutypes = uniq(sort(map(images, (img) => img.type)));
 	if (! (device.sutype in valid_sutypes)) {
 		if (device.sutype == "sysupgrade" && length(valid_sutypes) == 1)
 			device.sutype = valid_sutypes[0];
@@ -1089,7 +1095,7 @@ function complete_build_info(profile, board)
 			L.bug("Sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
 	}
 
-	for (let img in profile.images) {
+	for (let img in images) {
 		if (img.filesystem == build.to.fstype && img.type == device.sutype) {
 			build.to.img_file = img.name;
 			break;
