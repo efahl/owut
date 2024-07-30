@@ -107,11 +107,29 @@ let _fslo      = 1;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v
 let _fshi      = 1024;
 let _list_fmts = ["fs-user", "fs-all", "config"];
 
+function parse_rev_code(version_code)
+{
+	return match(version_code, /^r(\d+)-[0-9a-f]+$/i);
+}
+
+// Add a custom validator for the '--rev-code' option value.
+ap.ArgActions["rc"] = function(self, params) {
+	let rc = params.value;
+	if (rc && rc != "none" && ! parse_rev_code(rc)) {
+		this.usage_short(self, {
+			exit: 1,
+			prefix: `ERROR: invalid version code format '${params.value}'`
+		});
+	}
+	this.store(self, params);
+};
+
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
 	ap.DEFAULT_VERSION,
 	{ name: "command",     position: 0, one_of: commands,      action: "store",                               help: "Sub-command to execute" },
 	{ name: "version_to",  short: "-V", long: "--version-to",  action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "rev_code",    short: "-R", long: "--rev-code",    action: "rc",        nargs: 1, default: null,  help: "Specify a 'version_code', literal 'none' allowed, defaults to latest build." },
 	{ name: "verbosity",   short: "-v", long: "--verbose",     action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
 	{ name: "keep",        short: "-k", long: "--keep",        action: "set",                 default: false, help: "Save all downloaded working files." },
 	{ name: "force",                    long: "--force",       action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
@@ -963,7 +981,7 @@ const BuildInfo = {
 	rev_num: function() {
 		// Extracts the revision number from the revision code:
 		//     "r23630-842932a63d" -> 23630
-		let m = match(this.rev_code, /r(\d*)-(.*)/);
+		let m = parse_rev_code(this.rev_code);
 		return m ? int(m[1]) : 0;
 	},
 };
@@ -1188,15 +1206,18 @@ function collect_platform()
 	// Previously, to solve this issue we'd look at the download server:
 	//   url.platform = `${url.upstream}/${release.dir}/targets/${device.target}/profiles.json`;
 	//   let profile = platform.profiles[device.platform];
+	//
+	// Use upstream as much as possible, per @aparcar's comment:
+	// https://github.com/efahl/owut/issues/2#issuecomment-2165021615
 
-	url.platform = `${url.static_root}/${release.dir}/targets/${device.target}/${device.platform}.json`;
+	url.platform = `${url.upstream}/${release.dir}/targets/${device.target}/profiles.json`;
 
 	let platform = dl_platform();
 	if (! platform) {
-		L.die("Unsupported platform '%s' or target '%s'\n", device.platform, device.target);
+		L.die("Unsupported target '%s' or profile '%s'\n", device.target, device.platform);
 	}
 
-	let profile = platform;
+	let profile = platform.profiles[device.platform];
 	device.arch = platform.arch_packages;
 
 	complete_build_info(profile, platform);
@@ -1550,7 +1571,9 @@ function blob(report)
 		}
 	}
 
-	L.log(log_level, "Build: Requesting version %s (kernel %s)\n", build.to.rev_code, build.to.kver);
+	let rc = (options.rev_code == "none" ? "" : options.rev_code) ?? build.to.rev_code;
+
+	L.log(log_level, "Build: Requesting version %s (kernel %s)\n", rc || "none", build.to.kver);
 	if (build.to.fstype != device.fstype) {
 		L.log(log_level, "Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
@@ -1561,7 +1584,7 @@ function blob(report)
 		profile:       device.platform,  // sanitized board name
 
 		version:       build.to.version,
-		version_code:  build.to.rev_code,
+		version_code:  rc,
 		filesystem:    build.to.fstype,
 
 		diff_packages: contains_defaults,
@@ -1726,10 +1749,11 @@ function download()
 				break;
 
 			case 200: // All done.
+				let req_version_code = response.request.version_code;
 				L.log(0, "\nBuild completed in %d seconds.\n", time()-start);
 				L.log(1, "  build_at       = %s\n", response.build_at);
-				L.log(1, "  version_number = %s\n", response.version_number);
-				L.log(1, "  version_code   = %s\n", response.version_code);
+				L.log(0, "  version_number = %s\n", response.version_number);
+				L.log(0, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
 				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(0, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
 				L.log(2, "  images = %.2J\n",       response.images);
@@ -1769,9 +1793,11 @@ function download()
 					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
 				}
 
-				if (response.version_code != build.to.rev_code) {
-					L.err("Firmware revision mismatch: expected %s, but got %s\n",
-						build.to.rev_code, response.version_code);
+				if (req_version_code && response.version_code != req_version_code) {
+					L.err("Firmware revision mismatch: expected %s, but got %s\n" +
+					      "If you determine this is acceptable, simply 'owut verify' " +
+					      "and 'owut install'.\n",
+						req_version_code, response.version_code);
 					errors++;
 				}
 				for (let pkg in top_level(SrcType.ALL)) {
