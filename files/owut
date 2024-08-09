@@ -27,6 +27,8 @@ const wiki_url  = "https://openwrt.org/docs/guide-user/installation/sysupgrade.o
 
 //------------------------------------------------------------------------------
 
+const EXIT_OK = 0, EXIT_ERR = 1;
+
 const Logger = {
 	_levels: [],
 	_level: 0,
@@ -74,7 +76,7 @@ const Logger = {
 
 	die: function(fmt, ...args) {
 		this.err(fmt, ...args);
-		exit(1);
+		exit(EXIT_ERR);
 	},
 	bug: function(fmt, ...args) {
 		// Variant for errors indicating code issue, not a user error.
@@ -271,9 +273,8 @@ let sha256 = {
 	verify: function() {
 		// Run validation against the saved checksums.
 		let data = ubus.run("/bin/busybox", "sha256sum", "-c", tmp.firmware_sums);
-		if (data?.code == 0)
-			return data;
-		this._fatal("verify", data);
+		if (! data) this._fatal("verify", data);
+		return data;
 	},
 
 	_fatal: function(where, data) {
@@ -415,7 +416,7 @@ function dl_json(url, json_file, keep_going)
 		return read_tmp_json(json_file);
 	}
 	L.err("Response status %s while downloading\n  %s\n", rsp?.status, url);
-	return keep_going ? null : exit(1);
+	return keep_going ? null : exit(EXIT_ERR);
 }
 
 function dl_platform()
@@ -1070,7 +1071,7 @@ function collect_build_info()
 	if (! (ver_to_branch in release.branches) ||
 	    ! (ver_to        in release.branches[ver_to_branch].versions)) {
 		show_versions(true);
-		exit(1);
+		exit(EXIT_ERR);
 	}
 
 	let fstype = options.fstype || device.fstype;
@@ -1190,7 +1191,7 @@ function collect_overview()
 		// (i.e., ASU server will build a lot more than is shown) and
 		// we catch that when trying to fetch board_json below.
 		show_versions(true);
-		exit(1);
+		exit(EXIT_ERR);
 	}
 
 	release.dir      = replace(active_branch.path, "{version}", build.to.version);
@@ -1426,7 +1427,9 @@ function check_missing()
 	L.pop();
 	if (updates.missing) {
 		L.err("There are %s missing packages in the build package list, run 'owut check'\n", updates.missing);
+		return false;
 	}
+	return true;
 }
 
 function check_defaults()
@@ -1526,8 +1529,7 @@ function check_init_script()
 	const asu_defaults = "/rom/etc/uci-defaults/99-asu-defaults";
 	if (options.init_script) {
 		if (options.init_script != "-" && ! fs.access(options.init_script)) {
-			L.err("The specified init-script '%s' does not exist\n", options.init_script);
-			return false;
+			L.die("The specified init-script '%s' does not exist\n", options.init_script);
 		}
 	}
 	else if (fs.access(asu_defaults)) {
@@ -1538,7 +1540,6 @@ function check_init_script()
 			`  ${wiki_url}#using_a_uci-defaults_script\n\n`
 		);
 	}
-	return true;
 }
 
 function blob(report)
@@ -1817,10 +1818,7 @@ function download()
 					}
 				}
 
-				if (! errors) {
-					return verify_image();
-				}
-				break;
+				return errors == 0;
 
 			// Everything else is "failure - we're done" cases.
 			case 400: // Invalid build request.
@@ -1886,22 +1884,25 @@ ubus.init();
 initialize_urls();
 
 let updates;
-let errors;
+let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
+
 switch (options.command) {
 	case "versions":
 		collect_overview();
 		show_versions(false);
+		exit_status = EXIT_OK;
 		break;
 
 	case "dump":
 		collect_all();
 		dump();
+		exit_status = EXIT_OK;
 		break;
 
 	case "list":
 		collect_all();
 		list();
-		check_missing();
+		if (check_missing()) exit_status = EXIT_OK;
 		break;
 
 	case "check":
@@ -1909,23 +1910,21 @@ switch (options.command) {
 		show_config();
 		updates = check_updates();
 		check_defaults();
-		errors = ! check_pkg_builds() || updates.missing;
+		if (check_pkg_builds() && ! updates.missing) exit_status = EXIT_OK;
 		check_init_script();
-		if (errors)
+		if (exit_status != EXIT_OK)
 			L.err("Checks reveal errors, do not upgrade\n");
-		else {
-			L.log(0, updates.changes == 0
-				? "There are no changes, upgrade not necessary.\n"
-				: "It is safe to proceed with an upgrade.\n"
-			);
-		}
+		else if (updates.changes == 0)
+			L.log(0, "There are no changes, upgrade not necessary\n");
+		else
+			L.log(0, "It is safe to proceed with an upgrade\n");
 		break;
 
 	case "blob":
 		collect_all();
 		check_init_script();
 		show_blob();
-		check_missing();
+		if (check_missing()) exit_status = EXIT_OK;
 		break;
 
 	case "download":
@@ -1948,26 +1947,24 @@ switch (options.command) {
 		}
 		if (updates.changes == 0) {
 			if (options.force)
-				L.wrn("Forcing build with no changes.\n");
+				L.wrn("Forcing build with no changes\n");
 			else {
-				L.log(0, "There are no changes to %s (see '--force').\n", options.command);
+				L.log(0, "There are no changes to %s (see '--force')\n", options.command);
+				exit_status = EXIT_OK;
 				break;
 			}
 		}
 		check_init_script();
-		if (download() && options.command == "upgrade") {
-			install();
-		}
-		break;
-	
+		if (! download()) break;
+		// fallthrough
+	case "verify":
 	case "install":
 		if (verify_image()) {
-			install();
+			exit_status = EXIT_OK;
+			if (options.command in ["upgrade", "install"]) {
+				install();
+			}
 		}
-		break;
-
-	case "verify":
-		verify_image();
 		break;
 
 	default:
@@ -1977,4 +1974,4 @@ switch (options.command) {
 
 uloop.done();
 ubus.term();
-exit();
+exit(exit_status);
