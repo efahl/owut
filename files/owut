@@ -1089,7 +1089,8 @@ function collect_build_info()
 function complete_build_info(profile, board)
 {
 	let dt = gmtime(board.source_date_epoch);
-	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ", dt.year, dt.mon, dt.mday, dt.hour, dt.min, dt.sec);
+	let since = time() - board.source_date_epoch;
+	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ (~%d hours ago)", dt.year, dt.mon, dt.mday, dt.hour, dt.min, dt.sec, (since+1800)/3600);
 	build.to.rev_code   = board.version_code;
 	build.to.img_prefix = profile.image_prefix;
 
