@@ -402,8 +402,11 @@ function read_tmp_json(file)
 {
 	// Read 'file' into a json object, then optionally delete the file.
 	// Primarily used to parse downloads from /tmp.
-
-	return json(read_tmp_file(file));
+	let txt = trim(read_tmp_file(file));
+	if (substr(txt, 0, 1) in [ "{", "[" ]) {
+		return json(txt);
+	}
+	return txt;
 }
 
 //------------------------------------------------------------------------------
@@ -1716,6 +1719,11 @@ function download()
 	let start    = time();
 	let response = dl_build(blob);
 	L.log(0, "\nRequesting build ----------------------\n");
+
+	if (! response || type(response) != "object" || length(response) == 0) {
+		L.die("Invalid response from build server:\n  '%s'\n"
+			+ "Check that '%s' is up...\n", response, url.sysupgrade_root);
+	}
 
 	let hash = response?.request_hash;
 	if (hash) {
