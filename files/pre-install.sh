@@ -22,8 +22,10 @@
 if true; then
 	stamp="$(date +'%FT%H%M')"
 
-	cp /tmp/firmware-manifest.json "/etc/owut.d/firmware-manifest-${stamp}.json" || exit 1
-	echo "Archived firmware-manifest.json to /etc/owut.d/firmware-manifest-${stamp}.json"
+	archive="/etc/owut.d/firmware-manifest-${stamp}.json"
+	cp /tmp/firmware-manifest.json "$archive" || exit 1
+	gzip "$archive" || exit 1
+	echo "Archived firmware-manifest.json to $archive.gz"
 fi
 
 
