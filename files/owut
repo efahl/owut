@@ -174,7 +174,6 @@ let tmp_root = "/tmp/owut-";
 let img_root = match(options.image, /(.*\/|)[^\.]*/)[0];
 let tmp = {
 	overview_json:      `${tmp_root}overview.json`,
-	versions_json:      `${tmp_root}versions.json`,
 	pkg_arch_json:      `${tmp_root}packages-arch.json`,
 	pkg_platform_json:  `${tmp_root}packages-plat.json`,
 	platform_json:      `${tmp_root}platform.json`,
@@ -437,12 +436,6 @@ function dl_overview()
 	//   url.api_root/branches.json
 
 	return dl_json(url.overview, tmp.overview_json);
-}
-
-function dl_versions()
-{
-	// The upstream .versions file containing all the current versions.
-	return dl_json(url.versions, tmp.versions_json);
 }
 
 function dl_failures(feed)
@@ -917,7 +910,6 @@ function initialize_urls()
 		store_root:      store,      // api database directory for build results
 		platform:        null,       // release platform json
 		overview:        overview,   // Top-level overview.json, contains branch info
-		versions:        null,       // Current versions from upstream buildbot
 		pkg_arch:        null,       // Generic arch package list, containing most of the items
 		pkg_plat:        null,       // Platform packages, built specifically for this platform
 
@@ -1134,7 +1126,6 @@ function collect_overview()
 
 	let overview = dl_overview();
 	url.upstream = overview.upstream_url ?? default_upstream;
-	url.versions = `${url.upstream}/.versions.json`;
 
 	let bad_releases = [ "23.05.1", ];
 
@@ -1149,26 +1140,6 @@ function collect_overview()
 			latest:   null,  // Determined below.
 			versions: filter(data.versions, (v) => !(v in bad_releases)),
 		};
-	}
-
-	let versions = dl_versions();
-	for (let version in versions.versions_list) {
-		if (version in bad_releases) continue;
-		// Ignore old branches that aren't present in overview.
-		let branch_id = branch_of(version);
-
-// see discussion in issue#2 regarding adding branches from .versions.json to augment overview
-//		if (options.legacy && ! (branch_id in release.branches)) {
-//			release.branches[branch_id] = {
-//				latest:   null,
-//				versions: [],
-//			};
-//		}
-
-		let working_branch = release.branches[branch_id];
-		if (working_branch && ! (version in working_branch.versions)) {
-			push(working_branch.versions, version);
-		}
 	}
 
 	// Put everything in order, select 'latest'...
