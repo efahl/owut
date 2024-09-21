@@ -9,9 +9,8 @@ let NAME    = "owut";
 let VERSION = "%%VERSION%%";
 let PROG    = `${NAME}/${VERSION}`;
 
-const uloop   = require("uloop");
-const uclient = require("uclient");
-
+import * as uloop    from "uloop";
+import * as uclient  from "uclient";
 import * as fs       from "fs";
 import * as mod_ubus from "ubus";
 import * as ap       from "utils.argparse";
@@ -111,7 +110,7 @@ let _list_fmts = ["fs-user", "fs-all", "config"];
 
 function parse_rev_code(version_code)
 {
-	return match(version_code, /^r(\d+)-[0-9a-f]+$/i);
+	return match(version_code, /^r(\d+)-([[:xdigit:]]+)$/i);
 }
 
 // Add a custom validator for the '--rev-code' option value.
@@ -330,7 +329,7 @@ function _request(url, dst_file, json_blob)
 		},
 
 		error: (cb, code) => {
-			L.err("uclient error code=%s\n  This could be due to the server being down or inaccessible, check\n  %s", code, url);
+			L.err("uclient error code=%s\n  This could be due to the server being down or inaccessible, check\n  %s\n", code, url);
 			uloop.end();
 		},
 	});
