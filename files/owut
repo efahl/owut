@@ -465,11 +465,29 @@ function dl_package_versions()
 	return sort({ ...(arch ?? []), ...(plat?.packages ?? []) });
 }
 
+function check_build_response(response, file)
+{
+	// Check the build responses for errors and substitute appropriate
+	// messages when the request has failed.
+	if (! response) {
+		return {
+			status: -1,
+			detail: "Error: unknown server error",
+		};
+	}
+	if (! (response.status in [200, 202])) {
+		let txt = trim(read_tmp_file(file));
+		response.detail = "Error: "+txt;
+		return response;
+	}
+	return null;
+}
+
 function dl_build(config)
 {
 	// Start a build by POSTing the json build configuration.
 	let rsp = _request(url.build, tmp.build_json, config);
-	return rsp && read_tmp_json(tmp.build_json);
+	return check_build_response(rsp, tmp.build_json) || read_tmp_json(tmp.build_json);
 }
 
 function dl_build_status()
@@ -479,7 +497,7 @@ function dl_build_status()
 	// function.
 
 	let rsp = _request(url.build_status, tmp.build_status_json);
-	return rsp && read_tmp_json(tmp.build_status_json);
+	return check_build_response(rsp, tmp.build_status_json) || read_tmp_json(tmp.build_status_json);
 }
 
 //------------------------------------------------------------------------------
@@ -1686,14 +1704,9 @@ function download()
 		}
 	}
 
+	L.log(0, "\nRequesting build ----------------------\n");
 	let start    = time();
 	let response = dl_build(blob);
-	L.log(0, "\nRequesting build ----------------------\n");
-
-	if (! response || type(response) != "object" || length(response) == 0) {
-		L.die("Invalid response from build server:\n  '%s'\n"
-			+ "Check that '%s' is up...\n", response, url.sysupgrade_root);
-	}
 
 	let hash = response?.request_hash;
 	if (hash) {
