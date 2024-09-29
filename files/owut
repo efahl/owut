@@ -477,7 +477,9 @@ function check_build_response(response, file)
 	}
 	if (! (response.status in [200, 202])) {
 		let txt = trim(read_tmp_file(file));
-		response.detail = "Error: "+txt;
+		response.detail = substr(txt, 1, 1) != "{"
+				? json(txt).detail
+				: ("Error: "+txt);
 		return response;
 	}
 	return null;
@@ -520,7 +522,7 @@ function ck_int(s)
 
 const standard = regexp("^([0-9.]+)(~([0-9a-f]+)){0,1}(-r([0-9]+)){0,1}$", "i");
 const pre_bits = regexp("^[-a-z.]+",          "i");
-const ver_bits = regexp("^[0-9.]+",           "i"); 
+const ver_bits = regexp("^[0-9.]+",           "i");
 const ver_splt = regexp("[^a-z0-9]",          "i");
 const rev_bits = regexp("-[r]{0,1}([0-9]+)$", "i");
 
@@ -1016,15 +1018,13 @@ function collect_device_info()
 	}
 
 	let target   = sysb.release.target;
-	let platform = sysb.board_name;
+	let platform = replace(sysb.board_name, /,/, "_");
 	let ver_from = sysb.release.version;
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade (or trx or lxl or ???)
 
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
 	if (match(target, /^(x86|armsr)\/(.*)$/)) {
-		// I'm still unclear about target=x86/geode with platform=geos?
-		platform = "generic";
 		sutype   = "combined";
 	}
 	else {
@@ -1032,7 +1032,6 @@ function collect_device_info()
 		// assume it is "sysupgrade", which might be wrong.  We'll
 		// fix this after we get the profiles for the device, see
 		// 'collect_all'.
-		platform = replace(platform, /,/, "_");
 		sutype   = "sysupgrade";
 	}
 
@@ -1204,10 +1203,32 @@ function collect_platform()
 	// https://github.com/efahl/owut/issues/2#issuecomment-2165021615
 
 	url.platform = `${url.upstream}/${release.dir}/targets/${device.target}/profiles.json`;
-
 	let platform = dl_platform();
 	if (! platform) {
-		L.die("Unsupported target '%s' or profile '%s'\n", device.target, device.platform);
+		L.die("Unsupported target '%s'\n", device.target);
+	}
+
+	if (! (device.platform in keys(platform.profiles))) {
+		// This is a mapped profile, e.g.: raspberrypi,model-b-plus -> rpi
+		let found = false;
+		for (let real_platform, data in platform.profiles) {
+			for (let alias in data.supported_devices) {
+				alias = replace(alias, ",", "_");
+				if (device.platform == alias) {
+					found = true;
+					L.log(1, "Mapping platform %s to %s\n", device.platform, real_platform);
+					device.platform = real_platform;
+					break;
+				}
+			}
+			if (found) break;
+		}
+		if (! found) {
+			if ("generic" in keys(platform.profiles))
+				device.platform = "generic";
+			else
+				L.die("Unsupported profile: %s\n  Valid profiles are %s\n", device.platform, keys(platform.profiles));
+		}
 	}
 
 	let profile = platform.profiles[device.platform];
