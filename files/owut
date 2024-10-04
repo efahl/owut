@@ -1174,6 +1174,7 @@ function collect_overview()
 	collect_build_info();
 
 	release.branch = branch_of(build.to.version);
+
 	let active_branch = overview.branches[release.branch];
 	if (! active_branch) {
 		// TODO Should probably check:
@@ -1838,9 +1839,9 @@ function download()
 			case 422: // Unknown package.
 			case 500: // Invalid build request.
 			default:  // ???
-				if (response.error ) L.log(0, "error  =\n%s\n", response.error);
-				if (response.stdout) L.log(0, "stdout =\n%s\n", response.stdout);
-				if (response.stderr) L.log(0, "stderr =\n%s\n", response.stderr);
+				if (response.error ) L.log(0, "ASU server error  =\n%s\n", response.error);
+				if (response.stdout) L.log(0, "ASU server stdout =\n%s\n", response.stdout);
+				if (response.stderr) L.log(0, "ASU server stderr =\n%s\n", response.stderr);
 				L.err("Build failed with status %s\n", status);
 				errors++;
 				break;
