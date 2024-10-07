@@ -401,10 +401,13 @@ function read_tmp_json(file)
 	// Read 'file' into a json object, then optionally delete the file.
 	// Primarily used to parse downloads from /tmp.
 	let txt = trim(read_tmp_file(file));
-	if (substr(txt, 0, 1) in [ "{", "[" ]) {
+	try {
 		return json(txt);
 	}
-	return txt;
+	catch (error) {
+		L.err("Expected json, but '%s'\n", error);
+		return txt;
+	}
 }
 
 //------------------------------------------------------------------------------
@@ -477,9 +480,12 @@ function check_build_response(response, file)
 	}
 	if (! (response.status in [200, 202])) {
 		let txt = trim(read_tmp_file(file));
-		response.detail = substr(txt, 1, 1) != "{"
-				? json(txt).detail
-				: ("Error: "+txt);
+		try {
+			response.detail = json(txt).detail;
+		}
+		catch {
+			response.detail = "Error: " + txt;
+		}
 		return response;
 	}
 	return null;
