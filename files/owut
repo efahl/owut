@@ -481,7 +481,7 @@ function check_build_response(response, file)
 	if (! (response.status in [200, 202])) {
 		let txt = trim(read_tmp_file(file));
 		try {
-			response.detail = json(txt).detail;
+			response = json(txt);
 		}
 		catch {
 			response.detail = "Error: " + txt;
