@@ -144,7 +144,7 @@ let arg_defs = proto([
 	{ name: "pre_install",   short: "-p", long: "--pre-install",   action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
 	{ name: "poll_interval", short: "-T", long: "--poll-interval", action: "store_int", nargs: 1, default: 10000, help: "Poll interval for build monitor, in milliseconds." },
 
-	{ name: "device",                   long: "--device",      action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
+	{ name: "device",                     long: "--device",        action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
@@ -296,6 +296,29 @@ function sysupgrade(file, check, options)
 
 //------------------------------------------------------------------------------
 
+let dl_stats = {
+	count: 0,  // Number of files downloaded.
+	time:  0,  // Sum of wall time taken.
+	bytes: 0,  // Only includes content, not http headers.
+
+	Mbits: (bytes) => (bytes * 8.0 / (1024*1024)),
+	log: function(url, file, bytes, time) {
+		this.bytes += bytes;
+		this.time  += time;
+		this.count++;
+
+		let Mbits = this.Mbits(bytes);
+		L.log(1, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, file, bytes, Mbits/time);
+	},
+
+	report: function() {
+		if (this.count > 0) {
+			let Mbps = this.Mbits(this.bytes) / this.time;
+			L.log(1, "Downloaded %d files, %d bytes at %.3f Mbps\n", this.count, this.bytes, Mbps);
+		}
+	},
+};
+
 function _request(url, dst_file, json_blob)
 {
 	//  uclient function for simple http requests
@@ -367,9 +390,8 @@ function _request(url, dst_file, json_blob)
 
 	if (rsp_headers) {
 		let elapsed = (time() - start) || 0.5;
-		let bytes = fs.stat(dst_file).size || 1;
-		let mbits = (bytes * 8.0 / (1024*1024));
-		L.log(1, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, dst_file, bytes, mbits/elapsed);
+		let bytes = fs.stat(dst_file).size;
+		dl_stats.log(url, dst_file, bytes, elapsed);
 
 		L.log(2, "Response headers = %.2J\n", rsp_headers);
 
@@ -1848,9 +1870,9 @@ function download()
 			case 422: // Unknown package.
 			case 500: // Invalid build request.
 			default:  // ???
-				if (response.error ) L.log(0, "ASU server error  =\n%s\n", response.error);
-				if (response.stdout) L.log(0, "ASU server stdout =\n%s\n", response.stdout);
-				if (response.stderr) L.log(0, "ASU server stderr =\n%s\n", response.stderr);
+				if (response.error ) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server error"), response.error);
+				if (response.stdout) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stdout"), response.stdout);
+				if (response.stderr) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stderr"), response.stderr);
 				L.err("Build failed with status %s\n", status);
 				errors++;
 				break;
@@ -1994,6 +2016,8 @@ switch (options.command) {
 		L.err("'%s' not implemented\n", options.command);
 		break;
 }
+
+dl_stats.report();
 
 uloop.done();
 ubus.term();
