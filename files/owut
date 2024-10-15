@@ -319,12 +319,21 @@ let dl_stats = {
 	},
 };
 
-function _request(url, dst_file, json_blob)
+function _request(url, dst_file, params)
 {
 	//  uclient function for simple http requests
 	//   url       = self explanatory
 	//   dst_file  = result of request
-	//   json_blob = optional POST data, GET used if null
+	//   params    = dictionary of optional parameters:
+	//     'type'      = 'GET' (default), 'HEAD' or 'POST'
+	//     'json_data' =  json data, forces 'POST' implicitly
+
+	let json_data = params?.json_data;
+	let type      = params?.type ?? "GET";
+
+	if (! (type in ["GET", "HEAD", "POST"])) {
+		L.bug("Invalid request type '%s'\n", type);
+	}
 
 	let start = time();
 	let uc;
@@ -367,7 +376,6 @@ function _request(url, dst_file, json_blob)
 		return null;
 	}
 
-	let type = "GET";
 	let headers = {
 		"User-Agent": PROG,
 	};
@@ -375,10 +383,10 @@ function _request(url, dst_file, json_blob)
 		headers: headers,
 	};
 
-	if (json_blob) {
+	if (json_data) {
 		type = "POST";
 		headers["Content-Type"] = "application/json";
-		args["post_data"] = json_blob;
+		args["post_data"] = json_data;
 	}
 
 	if (! uc.request(type, args)) {
@@ -402,7 +410,7 @@ function _request(url, dst_file, json_blob)
 		}
 	}
 
-	return uc.status();
+	return { ...uc.status(), type: type, headers: rsp_headers };
 }
 
 function read_tmp_file(file)
@@ -517,9 +525,11 @@ function check_build_response(response, file)
 function dl_build(config)
 {
 	// Start a build by POSTing the json build configuration.
-	let rsp = _request(url.build, tmp.build_json, config);
+	let rsp = _request(url.build, tmp.build_json, {json_data: config});
 	return check_build_response(rsp, tmp.build_json) || read_tmp_json(tmp.build_json);
 }
+
+let _use_HEAD = true;
 
 function dl_build_status()
 {
@@ -527,7 +537,24 @@ function dl_build_status()
 	// as this is the  ongoing status query.  See switch cases in 'download'
 	// function.
 
-	let rsp = _request(url.build_status, tmp.build_status_json);
+	let rsp = _use_HEAD && _request(url.build_status, tmp.build_status_json, {type: "HEAD"});
+	if (rsp?.status == 405) {
+		_use_HEAD = false;
+	}
+	else if (rsp?.status == 202) {
+		// Build a minimal response.
+		let ib_queue  = rsp.headers["x-queue-position"];
+		let ib_status = rsp.headers["x-imagebuilder-status"];
+		return {
+			status:              rsp.status,
+			detail:              ib_status ?? "queued",
+			queue_position:      ib_queue,
+			imagebuilder_status: ib_status,
+		};
+	}
+
+	// Otherwise do a full GET.
+	rsp = _request(url.build_status, tmp.build_status_json);
 	return check_build_response(rsp, tmp.build_status_json) || read_tmp_json(tmp.build_status_json);
 }
 
@@ -536,7 +563,7 @@ function dl_build_status()
 function to_int(s)
 {
 	// Must be an int or there's a bug in caller.
-	if (! match(s, /^[0-9]+$/)) L.bug("invalid int '%s'\n", s);
+	if (! match(s, /^[0-9]+$/)) L.bug("Invalid int '%s'\n", s);
 	return int(s);
 }
 
