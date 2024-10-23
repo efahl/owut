@@ -29,6 +29,8 @@ const wiki_url  = "https://openwrt.org/docs/guide-user/installation/sysupgrade.o
 const EXIT_OK = 0, EXIT_ERR = 1;
 
 const Logger = {
+	_n_lines: 0,
+
 	_levels: [],
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
@@ -57,9 +59,24 @@ const Logger = {
 		return this.color(color_name) + text + this.color(this.reset);
 	},
 
+	mark: function() { this._n_lines = 0; },
+	backup: function() {
+		if (this.stdout_is_pipe) return;
+		printf("\033[%dA\r", this._n_lines);
+		fs.stdout.flush();
+		this.mark();
+	},
+
+	_fmt: function(fmt, ...args)
+	{
+		let s = sprintf(fmt, ...args);
+		this._n_lines += length(match(s, /\n/g));
+		return s;
+	},
+
 	_out: function(prefix, clr, fmt, ...args)
 	{
-		warn(sprintf("%s: ", this.colorize(clr, prefix)), sprintf(fmt, ...args));
+		warn(sprintf("%s: ", this.colorize(clr, prefix)), this._fmt(fmt, ...args));
 	},
 
 	err: function(fmt, ...args) { this._out("ERROR",   this.RED,    fmt, ...args); },
@@ -68,7 +85,7 @@ const Logger = {
 	log: function(level, fmt, ...args)
 	{
 		if (this._level >= level) {
-			printf(fmt, ...args);
+			print(this._fmt(fmt, ...args));
 			fs.stdout.flush();
 		}
 	},
@@ -142,7 +159,7 @@ let arg_defs = proto([
 	{ name: "image",         short: "-i", long: "--image",         action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",        short: "-f", long: "--format",        action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",   action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
-	{ name: "poll_interval", short: "-T", long: "--poll-interval", action: "store_int", nargs: 1, default: 10000, help: "Poll interval for build monitor, in milliseconds." },
+	{ name: "poll_interval", short: "-T", long: "--poll-interval", action: "store_int", nargs: 1, default: 2000,  help: "Poll interval for build monitor, in milliseconds." },
 
 	{ name: "device",                     long: "--device",        action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
@@ -1644,9 +1661,9 @@ function blob(report)
 
 	let rc = (options.rev_code == "none" ? "" : options.rev_code) ?? build.to.rev_code;
 
-	L.log(log_level, "Build: Requesting version %s (kernel %s)\n", rc || "none", build.to.kver);
+	L.log(log_level, "Request:\n  Version %s (kernel %s)\n", rc || "none", build.to.kver);
 	if (build.to.fstype != device.fstype) {
-		L.log(log_level, "Build: Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
+		L.log(log_level, "  Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
 
 	let blob = {
@@ -1664,12 +1681,12 @@ function blob(report)
 
 	if (options.rootfs_size) {
 		blob.rootfs_size_mb = options.rootfs_size;
-		L.log(log_level, "Build: ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
+		L.log(log_level, "  ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
 	}
 
 	if (init_script) {
 		blob.defaults = init_script;
-		L.log(log_level, "Build: Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
+		L.log(log_level, "  Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 	}
 
 	return blob;
@@ -1782,27 +1799,38 @@ function download()
 		}
 	}
 
-	L.log(0, "\nRequesting build ----------------------\n");
-	let start    = time();
-	let response = dl_build(blob);
+	let response      = dl_build(blob);
+	let t_start       = time();
+	let t_build_start = t_start;
 
 	let hash = response?.request_hash;
 	if (hash) {
-		L.log(0, "Hash:   %s\n", hash);
+		L.log(0, "Request hash:\n  %s\n", hash);
 		url.build_status = replace(url.build_status, "{hash}", hash);
 	}
 
-	let queries = 0;
-	let errors  = 0;
-	let poll_interval = 1000;  // Check first response right away.
+	let errors        = 0;
+	let prev_status   = "";
+	let poll_interval = 500;  // Check first response right away.
 	while (response && !errors) {
 		let status = response.status;
 
-		L.log(0, "Status: %d\n", status);
-		L.log(0, "Detail: %s", substr(response.detail, 0, 6) == "Error:" ? L.colorize(L.RED, response.detail) : response.detail);
+		if (response.detail == prev_status) {
+			L.backup();
+		}
+		else {
+			L.log(0, "--\n");
+			L.mark();
+			prev_status = response.detail;
+		}
+
+		let t_now = time();
+		let highlight = substr(response.detail, 0, 6) == "Error:" ? L.RED : L.GREEN;
+		L.log(0, "Status:   %s", L.colorize(highlight, response.detail));
 		switch (response.detail) {
 			case "queued":
 				L.log(0, " - %d ahead of you", response.queue_position);
+				t_build_start = t_now;
 				break;
 			case "started":
 				L.log(0, " - %s", response.imagebuilder_status ?? "setup");
@@ -1812,18 +1840,21 @@ function download()
 		}
 		L.log(0, "\n");
 
+		let t_total = t_now - t_start;
+		let t_queue = t_build_start - t_start;
+		let t_build = t_now - t_build_start;
+		L.log(0, "Progress: %3ds total = %3ds in queue + %3ds in build\n", t_total, t_queue, t_build);
+
 		switch (status) {
 			case 202: // Build in-progress, update monitor at user-specified interval.
 				sleep(poll_interval);
 				poll_interval = options.poll_interval;
-				queries++;
-				L.log(0, "\nProgress %3d (%4ds) -----------------------------\n", queries, time()-start);
 				response = dl_build_status();
 				break;
 
 			case 200: // All done.
 				let req_version_code = response.request.version_code;
-				L.log(0, "\nBuild completed in %d seconds.\n", time()-start);
+				L.log(0, "\nBuild succeeded in %3ds total = %3ds in queue + %3ds to build:\n", t_total, t_queue, t_build);
 				L.log(1, "  build_at       = %s\n", response.build_at);
 				L.log(0, "  version_number = %s\n", response.version_number);
 				L.log(0, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
@@ -1897,6 +1928,7 @@ function download()
 			case 422: // Unknown package.
 			case 500: // Invalid build request.
 			default:  // ???
+				L.log(0, "\nBuild failed in %3ds total = %3ds in queue + %3ds to build:\n", t_total, t_queue, t_build);
 				if (response.error ) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server error"), response.error);
 				if (response.stdout) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stdout"), response.stdout);
 				if (response.stderr) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stderr"), response.stderr);
