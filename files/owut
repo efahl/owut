@@ -29,8 +29,6 @@ const wiki_url  = "https://openwrt.org/docs/guide-user/installation/sysupgrade.o
 const EXIT_OK = 0, EXIT_ERR = 1;
 
 const Logger = {
-	_n_lines: 0,
-
 	_levels: [],
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
@@ -59,11 +57,14 @@ const Logger = {
 		return this.color(color_name) + text + this.color(this.reset);
 	},
 
-	mark: function() { this._n_lines = 0; },
+	_n_lines: 0,
+	mark:   function() { this._n_lines = 0; },
 	backup: function() {
-		if (this.stdout_is_pipe) return;
-		printf("\033[%dA\r", this._n_lines);
-		fs.stdout.flush();
+		// Reposition cursor up n lines and reset line counter.
+		if (! this.stdout_is_pipe) {
+			printf("\033[%dA\r", this._n_lines);
+			fs.stdout.flush();
+		}
 		this.mark();
 	},
 
@@ -148,7 +149,8 @@ let arg_defs = proto([
 	{ name: "command",       position: 0, one_of: commands,        action: "store",                               help: "Sub-command to execute" },
 	{ name: "version_to",    short: "-V", long: "--version-to",    action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
 	{ name: "rev_code",      short: "-R", long: "--rev-code",      action: "rc",        nargs: 1, default: null,  help: "Specify a 'version_code', literal 'none' allowed, defaults to latest build." },
-	{ name: "verbosity",     short: "-v", long: "--verbose",       action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "verbosity",     short: "-v", long: "--verbose",       action: "inc",                 default: 1,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "verbosity",     short: "-q", long: "--quiet",         action: "dec",                 default: 1,     help: "Reduce verbosity.  Repeat for total silence."},
 	{ name: "keep",          short: "-k", long: "--keep",          action: "set",                 default: false, help: "Save all downloaded working files." },
 	{ name: "force",                      long: "--force",         action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
 	{ name: "add",           short: "-a", long: "--add",           action: "store",     nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
@@ -325,13 +327,13 @@ let dl_stats = {
 		this.count++;
 
 		let Mbits = this.Mbits(bytes);
-		L.log(1, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, file, bytes, Mbits/time);
+		L.log(2, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, file, bytes, Mbits/time);
 	},
 
 	report: function() {
 		if (this.count > 0) {
 			let Mbps = this.Mbits(this.bytes) / this.time;
-			L.log(1, "Downloaded %d files, %d bytes at %.3f Mbps\n", this.count, this.bytes, Mbps);
+			L.log(2, "Downloaded %d files, %d bytes at %.3f Mbps\n", this.count, this.bytes, Mbps);
 		}
 	},
 };
@@ -418,7 +420,7 @@ function _request(url, dst_file, params)
 		let bytes = fs.stat(dst_file).size;
 		dl_stats.log(url, dst_file, bytes, elapsed);
 
-		L.log(2, "Response headers = %.2J\n", rsp_headers);
+		L.log(3, "Response headers = %.2J\n", rsp_headers);
 
 		if (options.keep) {
 			let hdrs = fs.open(tmp.rsp_header, "w");
@@ -851,7 +853,8 @@ function remove_package(pkg, silent)
 	}
 	else {
 		if (! is_top_level(pkg)) {
-			L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
+			if (! silent)
+				L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
 		}
 		else if (is_default(pkg)) {
 			L.wrn("package '%s' is a default package, removal may have unknown side effects\n", pkg);
@@ -1290,7 +1293,7 @@ function collect_platform()
 				alias = replace(alias, ",", "_");
 				if (device.platform == alias) {
 					found = true;
-					L.log(1, "Mapping platform %s to %s\n", device.platform, real_platform);
+					L.log(2, "Mapping platform %s to %s\n", device.platform, real_platform);
 					device.platform = real_platform;
 					break;
 				}
@@ -1356,14 +1359,14 @@ function dump()
 	let pkgs = sort(packageDB);
 	L.log(0, '{\n');
 	L.log(0, '"version": "%s",\n', PROG);
-	L.log(0, '"options": %.2J,\n', options);
-	L.log(0, '"url": %.2J,\n', urls);
-	L.log(0, '"tmp": %.2J,\n', tmps);
-	L.log(0, '"build": %.2J,\n', build);
+	L.log(1, '"options": %.2J,\n', options);
+	L.log(1, '"url": %.2J,\n', urls);
+	L.log(1, '"tmp": %.2J,\n', tmps);
+	L.log(1, '"build": %.2J,\n', build);
 	L.log(0, '"device": %.2J,\n', device);
 	L.log(0, '"release": %.2J,\n', release);
-	L.log(1, '"packageDB": %.2J,\n', pkgs);
-	L.log(2, '"packages": %.2J,\n', packages);
+	L.log(2, '"packageDB": %.2J,\n', pkgs);
+	L.log(3, '"packages": %.2J,\n', packages);
 	L.log(0, '}\n');
 }
 
@@ -1377,20 +1380,20 @@ function list()
 			packages = top_level(SrcType.USER_ONLY);
 			let ctype = "y"; // "y" to install, "m" just build package.
 			for (let pkg in sort(packages)) {
-				L.log(0, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
+				L.log(1, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
 			}
 			break;
 
 		case "fs-all":
 			packages = top_level(SrcType.ALL);
-			L.log(0, "%s\n", join(" ", packages));
+			L.log(1, "%s\n", join(" ", packages));
 			break;
 
 		case "fs-user":
 		default:
 			packages = top_level(SrcType.USER_ONLY);
 			push(packages, ...map(removed_defaults(), (pkg) => "-"+pkg));
-			L.log(0, "%s\n", join(" ", packages));
+			L.log(1, "%s\n", join(" ", packages));
 			break;
 	}
 }
@@ -1400,24 +1403,32 @@ function show_config()
 	// Pretty-print the major configuration values.
 	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
 	L.log(0,
+		`ASU-Server     ${url.sysupgrade_root}\n`
+		`Upstream       ${url.upstream}\n`
 		`Target         ${device.target}\n`
 		`Profile        ${device.platform}\n`
+		`Package-arch   ${device.arch}\n`
+	);
+	L.log(1,
 		`Root-FS-type   ${device.fstype}\n`
 		`Sys-type       ${device.sutype}\n`
-		`Package-arch   ${device.arch}\n`
+	);
+	L.log(0,
 		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kver})\n`
 		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kver})${downgrade}\n`
+	);
+	L.log(1,
 		`Build-FS-type  ${build.to.fstype}\n`
 		`Build-at       ${build.to.date}\n`
 		`Image-prefix   ${build.to.img_prefix}\n`
 		`Image-URL      ${url.download}\n`
 		`Image-file     ${build.to.img_file}\n`
 	);
-	L.log(0, "Installed      %3d packages\n", length(packageDB));
-	L.log(0, "Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
-	L.log(0, "Default        %3d packages\n", length(packages.default));
-	L.log(0, "User-installed %3d packages (top-level only)\n", length(top_level(SrcType.USER_ONLY)));
-	L.log(0, "\n");
+	L.log(1, "Installed      %3d packages\n", length(packageDB));
+	L.log(1, "Top-level      %3d packages\n", length(top_level(SrcType.ALL)));
+	L.log(1, "Default        %3d packages\n", length(packages.default));
+	L.log(1, "User-installed %3d packages (top-level only)\n", length(top_level(SrcType.USER_ONLY)));
+	L.log(1, "\n");
 }
 
 function check_updates()
@@ -1430,7 +1441,7 @@ function check_updates()
 	let missing    = 0;
 	let downgrades = 0;
 
-	L.log(0, "Package version changes:\n");
+	L.log(1, "Package version changes:\n");
 	let w0 = pkg_name_len + 2;
 	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
@@ -1474,7 +1485,7 @@ function check_updates()
 				c2 = L.color(L.YELLOW);
 				break;
 		}
-		L.log(0, f0, pkg, c1, old, c2, new, L.color(L.reset));
+		L.log(1, f0, pkg, c1, old, c2, new, L.color(L.reset));
 	}
 
 	if (missing) {
@@ -1492,15 +1503,15 @@ function check_updates()
 
 	if (length(packages.replaced)) {
 		let f0 =`  %-${w0}s  %s\n`;
-		L.log(0, "\nAutomatic package replacements/removals:\n");
-		L.log(0, f0, "Package", "Replaced-by");
+		L.log(1, "\nAutomatic package replacements/removals:\n");
+		L.log(1, f0, "Package", "Replaced-by");
 		for (let chg, to in sort(packages.replaced)) {
-			L.log(0, f0, chg, to ?? L.colorize(L.YELLOW, "removed"));
+			L.log(1, f0, chg, to ?? L.colorize(L.YELLOW, "removed"));
 		}
-		L.log(0, "Details at %s\n", url.overview);
+		L.log(1, "Details at %s\n", url.overview);
 	}
 
-	L.log(0, "\n");
+	L.log(1, "\n");
 
 	return { missing, changes, downgrades };
 }
@@ -1532,18 +1543,18 @@ function check_defaults()
 		}
 	}
 
-	L.log(0, "Default package analysis:\n");
+	L.log(1, "Default package analysis:\n");
 	if (length(changes) == 0) {
-		L.log(0, "  No missing or modified default packages.\n\n");
+		L.log(1, "  No missing or modified default packages.\n\n");
 	}
 	else {
 		let wid = pkg_name_len + 2;
 		let fmt = `  %-${wid}s  %s\n`;
-		L.log(0, fmt, "Default", "Provided-by");
+		L.log(1, fmt, "Default", "Provided-by");
 		for (let p, a in changes) {
-			L.log(0, fmt, p, a);
+			L.log(1, fmt, p, a);
 		}
-		L.log(0, "\n");
+		L.log(1, "\n");
 	}
 }
 
@@ -1568,13 +1579,13 @@ function check_pkg_builds()
 	let html_blob = dl_failures();
 	let feeds = map(match(html_blob, info), (f) => f[1]);
 	if (! html_blob || ! feeds) {
-		L.log(0, "No package build failures found for %s %s.\n\n", build.to.version, device.arch);
+		L.log(1, "No package build failures found for %s %s.\n\n", build.to.version, device.arch);
 	}
 	else {
-		L.log(0, "There are currently package build failures for %s %s:\n", build.to.version, device.arch);
+		L.log(1, "There are currently package build failures for %s %s:\n", build.to.version, device.arch);
 
 		for (let feed in feeds) {
-			L.log(0, "  Feed: %s\n", feed);
+			L.log(1, "  Feed: %s\n", feed);
 			html_blob = dl_failures(feed);
 			if (html_blob) {
 				let fails = match(html_blob, info);
@@ -1591,15 +1602,15 @@ function check_pkg_builds()
 					else {
 						msg = "not installed";
 					}
-					L.log(0, fmt, pkg, date, msg);
+					L.log(1, fmt, pkg, date, msg);
 				}
 			}
 		}
 
 		let prefix = failed ?
-			L.colorize(L.RED,   "NOTE THE ERRORS ABOVE:") :
+			L.colorize(L.RED,   "Package build failures affect this device:") :
 			L.colorize(L.GREEN, "Failures don't affect this device,");
-		L.log(0, "%s details at\n  %s\n\n", prefix, url.failed);
+		L.log(failed ? 0 : 1, "%s details at\n  %s\n\n", prefix, url.failed);
 	}
 
 	return ! failed;
@@ -1637,7 +1648,7 @@ function blob(report)
 
 	let contains_defaults = true;
 
-	let log_level = report ? 0 : 1;
+	let log_level = report ? 1 : 2;
 
 	let build_list = top_level(SrcType.ALL);
 
@@ -1702,7 +1713,7 @@ function show_blob()
 {
 	let b = blob();
 	if (b) {
-		L.log(0, "%.2J\n", b);
+		L.log(1, "%.2J\n", b);
 	}
 }
 
@@ -1731,11 +1742,11 @@ function verify_image()
 	}
 
 	let info = fs.stat(image);
-	L.log(0, "Verifying   : %s (%d bytes) against %s\n", image, info.size, tmp.firmware_sums);
+	L.log(1, "Verifying   : %s (%d bytes) against %s\n", image, info.size, tmp.firmware_sums);
 
 	let result = sha256.verify();
 	if (result?.code == 0) {
-		L.log(0, "  Saved sha256 matches\n");
+		L.log(1, "  Saved sha256 matches\n");
 	}
 	else {
 		let file_sha = sha256.sum(image);
@@ -1751,7 +1762,7 @@ function verify_image()
 
 	result = sysupgrade(image, true, ["--test"]);
 	if (result?.code == 0) {
-		L.log(0, "  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
+		L.log(1, "  %s\n", join("\n  ", split(trim(result.stderr), "\n")));
 	}
 	else {
 		L.err("sysupgrade validation failed:\n");
@@ -1763,7 +1774,7 @@ function verify_image()
 		return false;
 	}
 
-	L.log(0, "Checks complete, image is valid.\n");
+	L.log(1, "Checks complete, image is valid.\n");
 	return true;
 }
 
@@ -1791,7 +1802,7 @@ function download()
 	if (! blob) return false;
 
 	if (options.keep) {
-		L.log(1, "Saving build blob to %s\n", tmp.req_json);
+		L.log(2, "Saving build blob to %s\n", tmp.req_json);
 		let save = fs.open(tmp.req_json, "w");
 		if (save) {
 			save.write(blob);
@@ -1855,15 +1866,15 @@ function download()
 			case 200: // All done.
 				let req_version_code = response.request.version_code;
 				L.log(0, "\nBuild succeeded in %3ds total = %3ds in queue + %3ds to build:\n", t_total, t_queue, t_build);
-				L.log(1, "  build_at       = %s\n", response.build_at);
-				L.log(0, "  version_number = %s\n", response.version_number);
-				L.log(0, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
-				L.log(0, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
-				L.log(0, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
-				L.log(2, "  images = %.2J\n",       response.images);
-				L.log(3, "  build_cmd = %.2J\n",    response.build_cmd);
-				L.log(3, "  manifest = %.2J\n",     response.manifest);
-				L.log(0, "\n");
+				L.log(2, "  build_at       = %s\n", response.build_at);
+				L.log(1, "  version_number = %s\n", response.version_number);
+				L.log(1, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
+				L.log(1, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
+				L.log(1, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
+				L.log(3, "  images = %.2J\n",       response.images);
+				L.log(4, "  build_cmd = %.2J\n",    response.build_cmd);
+				L.log(4, "  manifest = %.2J\n",     response.manifest);
+				L.log(1, "\n");
 
 				let image = select_image(response.images);
 				if (! image) {
@@ -1877,7 +1888,7 @@ function download()
 				let img = `${bin}/${image.name}`;
 				let dst = options.image;
 
-				L.log(0, "Image source: %s\n", img);
+				L.log(1, "Image source: %s\n", img);
 
 				let rsp = _request(img, dst);
 				if (rsp?.status != 200) {
@@ -1894,7 +1905,7 @@ function download()
 				if (manifest_file) {
 					manifest_file.write(sprintf("%.2J\n", response));
 					manifest_file.close();
-					L.log(0, "Manifest    : %s\n", tmp.firmware_man);
+					L.log(1, "Manifest    : %s\n", tmp.firmware_man);
 				}
 
 				if (req_version_code && response.version_code != req_version_code) {
@@ -1953,7 +1964,7 @@ function run_pre_install_hook()
 		if (! fs.access(options.pre_install))
 			L.die(`Cannot access pre-install script '${options.pre_install}', aborting upgrade\n`);
 
-		L.log(0, "Executing pre-install script '%s'...\n", options.pre_install);
+		L.log(1, "Executing pre-install script '%s'...\n", options.pre_install);
 
 		let result = ubus.run(options.pre_install);
 
@@ -1961,7 +1972,7 @@ function run_pre_install_hook()
 		if (result?.stderr) L.log(0, result.stderr);
 		if (result.code != 0)
 			L.die(`Pre-install script '${options.pre_install}' failed with status ${result.code}, aborting upgrade\n`);
-		L.log(0, "Pre-install script terminated, proceeding with upgrade\n");
+		L.log(1, "Pre-install script terminated, proceeding with upgrade\n");
 	}
 }
 
@@ -1979,7 +1990,7 @@ function install()
 
 //------------------------------------------------------------------------------
 
-if (options.verbosity) {
+if (options.verbosity > 0 && ! (options.command in ["dump", "blob", "list"])) {
 	arg_defs.show_version();
 }
 

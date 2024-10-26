@@ -78,6 +78,13 @@ export const ArgActions = {
 		self.options[params.name] = value;
 	},
 
+	dec: function(self, params) {
+		assert(params.name, "'dec' action requires an option name");
+		assert(type(self.options[params.name]) == "int", `missing default value for '${params.name}'?`);
+		let value = exists(params, "value") ? int(params.value) : (self.options[params.name] - 1);
+		self.options[params.name] = value;
+	},
+
 	version: function(self, params) {
 		self.show_version();
 	},
