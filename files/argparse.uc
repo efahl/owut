@@ -34,6 +34,14 @@ export const ArgActions = {
 		assert(params.value, "'store' action requires a value");
 		self.options[params.name] = params.value;
 	},
+	storex: function(self, params) {
+		// Exclusive version of store, multiple stores generates an error.
+		if (self.options[params.name]) {
+			let p = this.long || this.short;
+			this.usage_short(self, {exit: 1, prefix: `ERROR: '${p}' may only be used once per invocation:\n  ${this.help}`});
+		}
+		this.store(self, params);
+	},
 
 	store_int: function(self, params) {
 		assert(params.name,  "'store_int' action requires an option name");
