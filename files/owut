@@ -826,6 +826,7 @@ function add_package(pkg, force)
 	// broken build for the package being added would otherwise fail).
 
 	if (is_installed(pkg)) {
+		packageDB[pkg].top_level = true;
 		return true;
 	}
 
