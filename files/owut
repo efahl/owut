@@ -1183,7 +1183,7 @@ function complete_build_info(profile, board)
 	build.to.img_prefix = profile.image_prefix;
 
 	// First, only allow legitimate "sysupgrade" types through.
-	let images = filter(profile.images, (img) => img.filesystem && img.filesystem != "initramfs");
+	let images = filter(profile.images, (img) => img.filesystem && img.filesystem != "initramfs" && ! match(img.type, /factory/));
 
 	let valid_fstypes = uniq(sort(map(images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
@@ -1200,7 +1200,8 @@ function complete_build_info(profile, board)
 		if (device.sutype == "sysupgrade" && length(valid_sutypes) == 1)
 			device.sutype = valid_sutypes[0];
 		else
-			L.bug("Sysupgrade type '%s' should be one of %s\n", device.sutype, valid_sutypes);
+			L.bug("%s:%s Sysupgrade type '%s' should be one of %s\n",
+				device.target, device.platform, device.sutype, valid_sutypes);
 	}
 
 	for (let img in images) {
