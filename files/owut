@@ -780,12 +780,11 @@ function what_provides(pkg)
 		if (m) return m[-1];
 	}
 
-	result = ubus.raw_run("apk", "list", "--installed", "--providers", pkg);
-	if (result) {
-		// <dnsmasq> dnsmasq-2.90-r3 x86_64 {dnsmasq} (GPL-2.0-or-later)
-		let m = match(result.stdout, /\{([^{]*)\}/);
-		if (m) return m[-1];
-
+	result = ubus.raw_run("apk", "list", "--installed", "--providers", "--manifest", pkg);
+	if (result && result.stdout) {
+		// <dnsmasq> dnsmasq-full 2.90-r3
+		let m = split(result.stdout, /\s+/);
+		if (m) return m[1];
 	}
 	return null;
 }
