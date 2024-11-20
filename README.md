@@ -28,6 +28,9 @@ opkg install attendedsysupgrade-common rpcd-mod-file ucode ucode-mod-fs \
 [ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
 wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
 wget -O /usr/bin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
+hash="$(wget -q -O - https://api.github.com/repos/efahl/owut/commits/main | jsonfilter -e '$.sha' | cut -c-8)"
+sed -i -e "s/%%VERSION%%/source-$hash/" /usr/bin/owut
+
 chmod +x /usr/bin/owut
 ```
 
