@@ -1088,9 +1088,10 @@ function collect_device_info()
 {
 	let sysb = ubus.call("system", "board");
 
-	let efi_check = "check";  // one of: force, no, check
+	let efi_check = null;
+
 	if (options.device) {
-		// Allow test cases (or "cross" downloads?), using undocumented
+		// Allow test cases (or "cross" downloads?), using '--device'
 		// option.  tegra is one with 'sdcard' sutype, use as follows:
 		//   owut ... --device tegra/generic:compulab_trimslice:squashfs
 		let bv = split(options.device, ":");
@@ -1105,9 +1106,19 @@ function collect_device_info()
 	let ver_from = sysb.release.version;
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade (or trx or lxl or ???)
 
+	// Generic efi targets are:
+	//   armsr     - EFI-boot only, see https://github.com/efahl/owut/issues/21
+	//   loongarch - EFI-boot only
+	//   x86       - EFI- or BIOS-boot
+	let efi_capable = match(target, /^(armsr|loongarch|x86)\//);
+	if (efi_check == null) {
+		efi_check = efi_capable ? "check" : "no";  // one of: force, no, check
+	}
+
 	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
 	// Wait, is there also "factory"??? See asu/build.py abt line 246
-	if (match(target, /^(x86|armsr)\/(.*)$/)) {
+	if (efi_capable) {
+		// No distinction between "factory" and "sysupgrade" for the generic devices.
 		sutype   = "combined";
 	}
 	else {
@@ -1119,7 +1130,6 @@ function collect_device_info()
 	}
 
 	if (efi_check == "force" || (efi_check == "check" && fs.access("/sys/firmware/efi"))) {
-		// All x86, maybe new armsr, too.
 		sutype = `${sutype}-efi`;
 	}
 
