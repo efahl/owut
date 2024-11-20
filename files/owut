@@ -960,12 +960,19 @@ function collect_packages()
 	//         },
 	//     };
 
-	let installed = ubus.call("rpc-sys", "packagelist", { "all": true });
-	packages.installed = installed.packages;
+	// Remove selected packages per
+	//   https://github.com/openwrt/openwrt/commit/451e2ce0
+	//   https://github.com/openwrt/openwrt/commit/999ef827
+	let excluded_packages = [ "kernel", "libc"]; // What abt "base-files"?
 
-	let top_level = ubus.call("rpc-sys", "packagelist", { "all": false });
-	delete top_level.packages["kernel"]; // Not sure how they get here...
-	delete top_level.packages["libc"];
+	let installed = ubus.call("rpc-sys", "packagelist", { all: true });
+	let top_level = ubus.call("rpc-sys", "packagelist", { all: false });
+	for (let pkg in excluded_packages) {
+	//	if (pkg in installed.packages) delete installed.packages[pkg];
+		if (pkg in top_level.packages) delete top_level.packages[pkg];
+	}
+
+	packages.installed = installed.packages;
 	packages.top_level = sort(keys(top_level.packages));
 
 	packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
