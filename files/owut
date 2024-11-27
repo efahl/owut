@@ -1331,6 +1331,10 @@ function collect_platform()
 
 	complete_build_info(profile, platform);
 	collect_defaults(platform.default_packages, profile.device_packages);
+
+	if ("linux_kernel" in platform) {
+		build.to.kver = platform.linux_kernel.version;
+	}
 }
 
 function collect_all()
@@ -1355,11 +1359,14 @@ function collect_all()
 
 	collect_packages();
 
-	build.to.kver = "unknown";
-	for (let pkg, data in packageDB) {
-		if (data.new_version && index(pkg, "kmod-") == 0 && is_default(pkg)) {
-			build.to.kver = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
-			break;
+	if (! build.to.kver) {
+		// Fall back to pre-"linux_kernel" scanning of packages.
+		build.to.kver = "unknown";
+		for (let pkg, data in packageDB) {
+			if (data.new_version && index(pkg, "kmod-") == 0 && is_default(pkg)) {
+				build.to.kver = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
+				break;
+			}
 		}
 	}
 
