@@ -213,6 +213,11 @@ let packageDB = {};      // Dictionary of installed packages and much status.
 let pkg_name_len = 0;
 
 let packages = {  // Dictionary of package lists.
+	// Remove selected packages per
+	//   https://github.com/openwrt/openwrt/commit/451e2ce0
+	//   https://github.com/openwrt/openwrt/commit/999ef827
+	non_upgradable: [ "kernel", "libgcc", "libc", "base-files" ],
+
 	// Collected from this device.
 	installed: {}, // All the name:version pairs.
 	top_level: [], // Simple list of names.
@@ -884,7 +889,11 @@ function collect_defaults(board, device)
 	// Use both board json for its defaults, then add the device-specific
 	// defaults to make one big defaults list.
 
-	packages.default = sort(["kernel", ...board, ...device]);
+	let defaults = [...board, ...device];
+	for (let pkg in packages.non_upgradable) {
+		if (! (pkg in defaults)) push(defaults, pkg);
+	}
+	packages.default = sort(defaults);
 }
 
 function apply_pkg_mods()
@@ -943,6 +952,15 @@ function apply_pkg_mods()
 	return errors == 0;
 }
 
+function _hack_libgcc1(obj)
+{
+	// APK ABI-version bug workaround:
+	if ("libgcc1" in obj) {
+		obj["libgcc"] = obj["libgcc1"];
+		delete obj["libgcc1"];
+	}
+}
+
 function collect_packages()
 {
 	// Using data from rpc-sys packagelist, build an object containing all
@@ -960,22 +978,17 @@ function collect_packages()
 	//         },
 	//     };
 
-	// Remove selected packages per
-	//   https://github.com/openwrt/openwrt/commit/451e2ce0
-	//   https://github.com/openwrt/openwrt/commit/999ef827
-	let excluded_packages = [ "kernel", "libc"]; // What abt "base-files"?
-
 	let installed = ubus.call("rpc-sys", "packagelist", { all: true });
 	let top_level = ubus.call("rpc-sys", "packagelist", { all: false });
-	for (let pkg in excluded_packages) {
-	//	if (pkg in installed.packages) delete installed.packages[pkg];
-		if (pkg in top_level.packages) delete top_level.packages[pkg];
-	}
+
+	_hack_libgcc1(installed.packages);
+	_hack_libgcc1(top_level.packages);
 
 	packages.installed = installed.packages;
 	packages.top_level = sort(keys(top_level.packages));
 
 	packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
+	_hack_libgcc1(packages.available);
 
 	for (let pkg, ver in packages.installed) {
 		packageDB[pkg] = {
@@ -1472,7 +1485,7 @@ function check_updates()
 	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let new = '';
 	for (let pkg, data in sort(packageDB)) {
-		if (pkg in [ "kernel", "libc" ]) continue; // They aren't in 'available'?
+		if (pkg in packages.non_upgradable) continue;
 
 		let old = data.version;
 		let new = data.new_version;
@@ -1563,6 +1576,7 @@ function check_defaults()
 
 	let changes = {};
 	for (let pkg in packages.default) {
+		if (pkg in packages.non_upgradable) continue;
 		if (! is_installed(pkg)) {
 			changes[pkg] = what_provides(pkg) ?? L.colorize(L.YELLOW, "not installed");
 		}
@@ -1940,12 +1954,14 @@ function download()
 						req_version_code, response.version_code);
 					errors++;
 				}
+				_hack_libgcc1(manifest);
 				for (let pkg in top_level(SrcType.ALL)) {
 					if (! (pkg in manifest)) {
 						L.err("Firmware missing requested package: '%s'\n", pkg);
 						errors++;
 						continue;
 					}
+					if (pkg in packages.non_upgradable) continue;
 
 					let expected_version = packageDB[pkg].new_version;
 					let received_version = manifest[pkg];
