@@ -1711,7 +1711,7 @@ function blob(report)
 
 	let rc = (options.rev_code == "none" ? "" : options.rev_code) ?? build.to.rev_code;
 
-	L.log(log_level, "Request:\n  Version %s (kernel %s)\n", rc || "none", build.to.kver);
+	L.log(log_level, "Request:\n  Version %s %s (kernel %s)\n", build.to.version, rc || "none", build.to.kver);
 	if (build.to.fstype != device.fstype) {
 		L.log(log_level, "  Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
