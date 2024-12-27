@@ -1040,7 +1040,7 @@ function show_versions(check_version_to)
 	// Using the ASU overview to get all the available versions, scan that
 	// for version-to and report.
 
-	L.log(0, "Available 'version-to' values:\n");
+	L.log(0, "Available 'version-to' values from %s:\n", url.sysupgrade_root);
 
 	let branches  = release.branches;
 	let installed = build.from.version;
