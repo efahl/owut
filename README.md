@@ -1,13 +1,13 @@
 # owut - OpenWrt Upgrade Tool
 
-`owut` is command line tool that upgrades your router's firmware.  It creates and installs custom builds of OpenWrt retaining all of the currently installed packages and configuration. 
+`owut` is command line tool that upgrades your router's firmware.  It creates custom images of OpenWrt using the [sysupgrade server](https://sysupgrade.openwrt.org) and installs them, retaining all of your currently installed packages and configuration. 
 
 Follow along or participate in the [owut package discussion](https://forum.openwrt.org/t/owut-openwrt-upgrade-tool/200035) on the OpenWrt forum.
 
 ## Installation
 
 > [!WARNING]
-> As of 2024-06-26, the dependency `ucode-mod-uclient` is only available on SNAPSHOT, so if you are running release version 23.05 or earlier, you cannot install `owut`.
+> `owut` depends on the `ucode-mod-uclient` package, which is only available on versions 24.10 and later, including main snapshots.  For OpenWrt 23.05 and earlier, use the [`auc` package](https://openwrt.org/docs/guide-user/installation/attended.sysupgrade#from_the_cli).
 
 `owut` is a standard OpenWrt package, making installation quite simple.
 
