@@ -940,12 +940,14 @@ function apply_pkg_mods()
 	}
 
 	// Do removals first, so any conflicts are suppressed.
-	for (let pkg in split(options.remove, ",")) {
+	for (let pkg in split(options.remove, /[,[:space:]]+/)) {
+		if (! pkg) continue;
 		if (! remove_package(pkg)) {
 			errors++;
 		}
 	}
-	for (let pkg in split(options.add, ",")) {
+	for (let pkg in split(options.add, /[,[:space:]]+/)) {
+		if (! pkg) continue;
 		if (! add_package(pkg)) {
 			errors++;
 		}
