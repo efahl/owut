@@ -391,7 +391,9 @@ function _request(url, dst_file, params)
 	});
 
 	if (! uc.ssl_init({verify: false})) {
-		L.err("Failed to initialize SSL\n");
+		L.err("ucode-mod-uclient requires an SSL library to function:\n" +
+		"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
+		"  one of the ca-bundle or ca-certificates packages.\n");
 		return null;
 	}
 
