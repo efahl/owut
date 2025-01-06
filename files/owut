@@ -1912,6 +1912,7 @@ function download()
 				L.log(2, "  build_at       = %s\n", response.build_at);
 				L.log(1, "  version_number = %s\n", response.version_number);
 				L.log(1, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
+				L.log(1, "  kernel_version = %s\n", build.to.kver);
 				L.log(1, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(1, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
 				L.log(3, "  images = %.2J\n",       response.images);
