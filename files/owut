@@ -893,7 +893,18 @@ function collect_defaults(board, device)
 	// Use both board json for its defaults, then add the device-specific
 	// defaults to make one big defaults list.
 
-	let defaults = [...board, ...device];
+	let defaults = []; // Must filter out and device-specific removals.
+	for (let pkg in board) {
+		if (! ("-"+pkg in device)) {
+			push(defaults, pkg);
+		}
+	}
+	for (let pkg in device) {
+		if (! match(pkg, /^-/)) {
+			push(defaults, pkg);
+		}
+	}
+
 	for (let pkg in packages.non_upgradable) {
 		if (! (pkg in defaults)) push(defaults, pkg);
 	}
