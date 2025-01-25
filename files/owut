@@ -263,6 +263,8 @@ const ubus = {
 //------------------------------------------------------------------------------
 
 let sha256 = {
+	cmd: [ "/bin/busybox", "sha256sum" ],
+
 	save: function(file, sum) {
 		// Create the checksum file from the image name and expected sum.
 		let sums = fs.open(tmp.firmware_sums, "w");
@@ -287,7 +289,7 @@ let sha256 = {
 
 	sum: function(file) {
 		// Return the checksum for the specified file.
-		let data = ubus.run("/bin/busybox", "sha256sum", file);
+		let data = ubus.run(...this.cmd, file);
 		if (data?.code == 0)
 			return substr(data.stdout, 0, 64);
 		this._fatal("sum", data);
@@ -295,7 +297,7 @@ let sha256 = {
 
 	verify: function() {
 		// Run validation against the saved checksums.
-		let data = ubus.run("/bin/busybox", "sha256sum", "-c", tmp.firmware_sums);
+		let data = ubus.run(...this.cmd, "-c", tmp.firmware_sums);
 		if (! data) this._fatal("verify", data);
 		return data;
 	},
