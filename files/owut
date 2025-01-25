@@ -2066,6 +2066,8 @@ initialize_urls();
 let updates;
 let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
 
+signal("SIGINT", exit);  // Ensure ctrl-C works when inside build loop.
+
 switch (options.command) {
 	case "versions":
 		collect_overview();
