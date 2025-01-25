@@ -1734,6 +1734,12 @@ function blob(report)
 	};
 
 	if (options.rootfs_size) {
+		// Disallow use of --rootfs-size on devices that cannot be resized.
+		let dirs = filter(fs.lsdir("/sys/class/block/"), (d) => match(d, /^(mtdblock|ubiblock|fit)[0-9]/));
+		if (length(dirs) > 0) {
+			L.die("This device does not have a resizeable root partition, do not use '--rootfs-size'.\n");
+		}
+
 		blob.rootfs_size_mb = options.rootfs_size;
 		L.log(log_level, "  ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
 	}
