@@ -1,6 +1,6 @@
 #!/usr/bin/ucode -S
 // owut - OpenWrt Upgrade Tool
-// Copyright (c) 2024 Eric Fahlgren <eric.fahlgren@gmail.com>
+// Copyright (c) 2024-2025 Eric Fahlgren <eric.fahlgren@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-only
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
@@ -153,11 +153,11 @@ let arg_defs = proto([
 	{ name: "verbosity",     short: "-q", long: "--quiet",         action: "dec",                 default: 1,     help: "Reduce verbosity.  Repeat for total silence."},
 	{ name: "keep",          short: "-k", long: "--keep",          action: "set",                 default: false, help: "Save all downloaded working files." },
 	{ name: "force",                      long: "--force",         action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
-	{ name: "add",           short: "-a", long: "--add",           action: "storex",    nargs: 1,                 help: "Comma-separated list of new packages to add to build list." },
-	{ name: "remove",        short: "-r", long: "--remove",        action: "storex",    nargs: 1,                 help: "Comma-separated list of installed packages to remove from build list." },
+	{ name: "add",           short: "-a", long: "--add",           action: "storex",    nargs: 1,                 help: "New packages to add to build list." },
+	{ name: "remove",        short: "-r", long: "--remove",        action: "storex",    nargs: 1,                 help: "Installed packages to remove from build list." },
 	{ name: "init_script",   short: "-I", long: "--init-script",   action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",        action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
-	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",   action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `Root file system size in MB (${_fslo}-${_fshi}).` },
+	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",   action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
 	{ name: "image",         short: "-i", long: "--image",         action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",        short: "-f", long: "--format",        action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",   action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
@@ -861,10 +861,10 @@ function remove_package(pkg, silent)
 	else {
 		if (! is_top_level(pkg)) {
 			if (! silent)
-				L.wrn("package '%s' has dependents and removal will have no effect on the build\n", pkg);
+				L.wrn("Package '%s' is a dependency, removal will have no effect on the build\n", pkg);
 		}
 		else if (is_default(pkg)) {
-			L.wrn("package '%s' is a default package, removal may have unknown side effects\n", pkg);
+			L.wrn("Package '%s' is a default package, removal may have unknown side effects\n", pkg);
 		}
 		delete packageDB[pkg];
 		return true;
@@ -1486,7 +1486,7 @@ function check_updates()
 	L.log(1, "Package version changes:\n");
 	let w0 = pkg_name_len + 2;
 	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
-	let f0 =`  %-${w0}s  %s%-${w1}s %s%s%s\n`;
+	let f0 = `  %-${w0}s  %s%-${w1}s %s%s%s\n`;
 	let new = '';
 	for (let pkg, data in sort(packageDB)) {
 		if (pkg in packages.non_upgradable) continue;
