@@ -821,6 +821,22 @@ function top_level(src_type)
 	return filter(keys(packageDB), tl);
 }
 
+function with_versions(pkg_list)
+{
+	let versioned = {};
+	for (let pkg in pkg_list) {
+		let ver = packages.available[pkg];
+		if (! ver) {
+			// Hackery because of packages historically missing from the indexes.
+			if (pkg in ["kernel", "libc"]) continue;
+
+			L.wrn("Package '%s' has no available current version\n", pkg);
+		}
+		versioned[pkg] = ver;
+	}
+	return versioned;
+}
+
 function removed_defaults()
 {
 	// Return the list of default packages that have been removed.
@@ -1706,7 +1722,12 @@ function blob(report)
 
 	let log_level = report ? 1 : 2;
 
-	let build_list = top_level(SrcType.ALL);
+	// We try to use 'packages_versions' in our server request, but can
+	// only do so if all packages have valid versions.  We fall back to
+	// using 'packages' when any version is undefined.
+	let package_list  = { packages: top_level(SrcType.ALL) };
+	package_list["packages_versions"] = with_versions(package_list.packages);
+	package_list["type"] = null in values(package_list.packages_versions) ? "packages" : "packages_versions";
 
 	let init_script;
 	if (options.init_script) {
@@ -1743,8 +1764,8 @@ function blob(report)
 		filesystem:    build.to.fstype,
 
 		diff_packages: contains_defaults,
-		packages:      build_list,
 	};
+	blob[package_list.type] = package_list[package_list.type];
 
 	if (options.rootfs_size) {
 		blob.rootfs_size_mb = options.rootfs_size;
