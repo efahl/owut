@@ -61,7 +61,7 @@ const Logger = {
 	mark:   function() { this._n_lines = 0; },
 	backup: function() {
 		// Reposition cursor up n lines and reset line counter.
-		if (! this.stdout_is_pipe) {
+		if (! this.stdout_is_pipe && this._n_lines > 0) {
 			printf("\033[%dA\r", this._n_lines);
 			fs.stdout.flush();
 		}
@@ -2052,7 +2052,7 @@ function run_pre_install_hook()
 		if (result?.stderr) L.log(0, result.stderr);
 		if (result.code != 0)
 			L.die(`Pre-install script '${options.pre_install}' failed with status ${result.code}, aborting upgrade\n`);
-		L.log(1, "Pre-install script terminated, proceeding with upgrade\n");
+		L.log(1, "Pre-install script successful, proceeding with upgrade\n");
 	}
 }
 
@@ -2111,6 +2111,8 @@ switch (options.command) {
 		check_init_script();
 		if (exit_status != EXIT_OK)
 			L.err("Checks reveal errors, do not upgrade\n");
+		else if (updates.downgrades)
+			L.wrn("Checks reveal package downgrades, upgrade still possible with '--force'\n");
 		else if (updates.changes == 0)
 			L.log(0, "There are no changes, upgrade not necessary\n");
 		else
