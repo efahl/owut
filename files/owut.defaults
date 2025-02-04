@@ -15,7 +15,7 @@ cat <<CONF >> "$conf_file"
 # '_' underscores.  Use 'owut --help' to see more.
 
 config owut 'owut'
-#       option verbosity      1
+#       option verbosity      0
 #       option keep           true
 #       option init_script   '/root/data/my-init-script.sh'
 #       option image         '/tmp/my-firmware-img.bin'
