@@ -216,7 +216,7 @@ let packages = {  // Dictionary of package lists.
 	// Remove selected packages per
 	//   https://github.com/openwrt/openwrt/commit/451e2ce0
 	//   https://github.com/openwrt/openwrt/commit/999ef827
-	non_upgradable: [ "kernel", "libgcc", "libc", "base-files" ],
+	non_upgradable: [ "kernel", "libgcc", "libc"],
 
 	// Collected from this device.
 	installed: {}, // All the name:version pairs.
@@ -985,15 +985,6 @@ function apply_pkg_mods()
 	return errors == 0;
 }
 
-function _hack_libgcc1(obj)
-{
-	// APK ABI-version bug workaround:
-	if ("libgcc1" in obj) {
-		obj["libgcc"] = obj["libgcc1"];
-		delete obj["libgcc1"];
-	}
-}
-
 function collect_packages()
 {
 	// Using data from rpc-sys packagelist, build an object containing all
@@ -1014,14 +1005,10 @@ function collect_packages()
 	let installed = ubus.call("rpc-sys", "packagelist", { all: true });
 	let top_level = ubus.call("rpc-sys", "packagelist", { all: false });
 
-	_hack_libgcc1(installed.packages);
-	_hack_libgcc1(top_level.packages);
-
 	packages.installed = installed.packages;
 	packages.top_level = sort(keys(top_level.packages));
 
 	packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
-	_hack_libgcc1(packages.available);
 
 	for (let pkg, ver in packages.installed) {
 		packageDB[pkg] = {
@@ -2004,14 +1991,14 @@ function download()
 						req_version_code, response.version_code);
 					errors++;
 				}
-				_hack_libgcc1(manifest);
+
 				for (let pkg in top_level(SrcType.ALL)) {
+					if (pkg in packages.non_upgradable) continue;
 					if (! (pkg in manifest)) {
 						L.err("Firmware missing requested package: '%s'\n", pkg);
 						errors++;
 						continue;
 					}
-					if (pkg in packages.non_upgradable) continue;
 
 					let expected_version = packageDB[pkg].new_version;
 					let received_version = manifest[pkg];
