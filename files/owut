@@ -1608,10 +1608,19 @@ function check_defaults()
 	//    2) modified/replaced by some other package.
 
 	let changes = {};
+	let count   = { retained: 0, replaced: 0, removed: 0 };
 	for (let pkg in packages.default) {
 		if (pkg in packages.non_upgradable) continue;
-		if (! is_installed(pkg)) {
-			changes[pkg] = what_provides(pkg) ?? L.colorize(L.YELLOW, "not installed");
+		if (is_installed(pkg))
+			count.retained++;
+		else {
+			changes[pkg] = what_provides(pkg);
+			if (changes[pkg])
+				count.replaced++;
+			else {
+				count.removed++;
+				changes[pkg] = L.colorize(L.YELLOW, "not installed");
+			}
 		}
 	}
 
@@ -1628,6 +1637,8 @@ function check_defaults()
 		}
 		L.log(1, "\n");
 	}
+
+	return count;
 }
 
 function check_pkg_builds()
@@ -2078,7 +2089,7 @@ ubus.init();
 
 initialize_urls();
 
-let updates;
+let updates, counts;
 let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
 
 signal("SIGINT", exit);  // Ensure ctrl-C works when inside build loop.
@@ -2106,9 +2117,11 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		updates = check_updates();
-		check_defaults();
+		counts = check_defaults();
 		if (check_pkg_builds() && ! updates.missing) exit_status = EXIT_OK;
 		check_init_script();
+		if (counts.removed)
+			L.wrn("There are %d missing default packages, confirm this is expected before proceeding\n", counts.removed);
 		if (exit_status != EXIT_OK)
 			L.err("Checks reveal errors, do not upgrade\n");
 		else if (updates.downgrades)
@@ -2139,11 +2152,13 @@ switch (options.command) {
 			L.err("Update checks reveal errors, can't proceed\n");
 			break;
 		}
-		check_defaults();
+		counts = check_defaults();
 		if (! check_pkg_builds()) {
 			L.err("Package build checks reveal errors, can't proceed\n");
 			break;
 		}
+		if (counts.removed)
+			L.wrn("There are %d missing default packages, confirm this is expected before proceeding\n", counts.removed);
 		if (updates.changes == 0) {
 			if (options.force)
 				L.wrn("Forcing build with no changes\n");
