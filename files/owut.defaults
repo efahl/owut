@@ -15,13 +15,15 @@ cat <<CONF >> "$conf_file"
 # '_' underscores.  Use 'owut --help' to see more.
 
 config owut 'owut'
-#       option verbosity      0
-#       option keep           true
-#       option init_script   '/root/data/my-init-script.sh'
-#       option image         '/tmp/my-firmware-img.bin'
-#       option rootfs_size    256
-#       option pre_install   '/etc/owut.d/pre-install.sh'
-#       option poll_interval  10000  # In milliseconds
+#	option verbosity         0
+#	option keep              true
+#	option init_script      '/root/data/my-init-script.sh'
+#	option image            '/tmp/my-firmware-img.bin'
+#	option rootfs_size       256
+#	option pre_install      '/etc/owut.d/pre-install.sh'
+#	option poll_interval     10000  # In milliseconds
+#	list   ignored_defaults 'kmod-drm-i915'
+#	list   ignored_defaults 'kmod-dwmac-intel'
 
 CONF
 echo "Please see owut section of $conf_file for example options."

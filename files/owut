@@ -146,24 +146,25 @@ ap.ArgActions["rc"] = function(self, params) {
 let arg_defs = proto([
 	ap.DEFAULT_HELP,
 	ap.DEFAULT_VERSION,
-	{ name: "command",       position: 0, one_of: commands,        action: "store",                               help: "Sub-command to execute" },
-	{ name: "version_to",    short: "-V", long: "--version-to",    action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
-	{ name: "rev_code",      short: "-R", long: "--rev-code",      action: "rc",        nargs: 1, default: null,  help: "Specify a 'version_code', literal 'none' allowed, defaults to latest build." },
-	{ name: "verbosity",     short: "-v", long: "--verbose",       action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
-	{ name: "verbosity",     short: "-q", long: "--quiet",         action: "dec",                 default: 0,     help: "Reduce verbosity.  Repeat for total silence."},
-	{ name: "keep",          short: "-k", long: "--keep",          action: "set",                 default: false, help: "Save all downloaded working files." },
-	{ name: "force",                      long: "--force",         action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
-	{ name: "add",           short: "-a", long: "--add",           action: "storex",    nargs: 1,                 help: "New packages to add to build list." },
-	{ name: "remove",        short: "-r", long: "--remove",        action: "storex",    nargs: 1,                 help: "Installed packages to remove from build list." },
-	{ name: "init_script",   short: "-I", long: "--init-script",   action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
-	{ name: "fstype",        short: "-F", long: "--fstype",        action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
-	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",   action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
-	{ name: "image",         short: "-i", long: "--image",         action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
-	{ name: "format",        short: "-f", long: "--format",        action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
-	{ name: "pre_install",   short: "-p", long: "--pre-install",   action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
-	{ name: "poll_interval", short: "-T", long: "--poll-interval", action: "store_int", nargs: 1, default: 2000,  help: "Poll interval for build monitor, in milliseconds." },
+	{ name: "command",       position: 0, one_of: commands,           action: "store",                               help: "Sub-command to execute" },
+	{ name: "version_to",    short: "-V", long: "--version-to",       action: "store",     nargs: 1, default: null,  help: "Specify the target version, defaults to installed version." },
+	{ name: "rev_code",      short: "-R", long: "--rev-code",         action: "rc",        nargs: 1, default: null,  help: "Specify a 'version_code', literal 'none' allowed, defaults to latest build." },
+	{ name: "verbosity",     short: "-v", long: "--verbose",          action: "inc",                 default: 0,     help: "Print various diagnostics.  Repeat for even more output." },
+	{ name: "verbosity",     short: "-q", long: "--quiet",            action: "dec",                 default: 0,     help: "Reduce verbosity.  Repeat for total silence."},
+	{ name: "keep",          short: "-k", long: "--keep",             action: "set",                 default: false, help: "Save all downloaded working files." },
+	{ name: "force",                      long: "--force",            action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
+	{ name: "add",           short: "-a", long: "--add",              action: "storex",    nargs: 1,                 help: "New packages to add to build list." },
+	{ name: "remove",        short: "-r", long: "--remove",           action: "storex",    nargs: 1,                 help: "Installed packages to remove from build list." },
+	{ name: "ignored_defaults",           long: "--ignored-defaults", action: "storex",    nargs: 1,                 help: "List of explicitly ignored default package names." },
+	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
+	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
+	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
+	{ name: "image",         short: "-i", long: "--image",            action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
+	{ name: "format",        short: "-f", long: "--format",           action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
+	{ name: "pre_install",   short: "-p", long: "--pre-install",      action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
+	{ name: "poll_interval", short: "-T", long: "--poll-interval",    action: "store_int", nargs: 1, default: 2000,  help: "Poll interval for build monitor, in milliseconds." },
 
-	{ name: "device",                     long: "--device",        action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
+	{ name: "device",                     long: "--device",           action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
 
 arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
@@ -927,6 +928,17 @@ function collect_defaults(board, device)
 	packages.default = sort(defaults);
 }
 
+function parse_package_list(opt)
+{
+	// Return array and null as-is, parse strings into array of string.
+	// String separators are any of comma, space or newline sequences.
+	// Allows use of either "list" or "option" in config file.
+	if (type(opt) == "string") {
+		opt = split(opt, /[,[:space:]]+/);
+	}
+	return opt;
+}
+
 function apply_pkg_mods()
 {
 	// 1) Handle 'overview.package_changes'.
@@ -969,13 +981,13 @@ function apply_pkg_mods()
 	}
 
 	// Do removals first, so any conflicts are suppressed.
-	for (let pkg in split(options.remove, /[,[:space:]]+/)) {
+	for (let pkg in parse_package_list(options.remove)) {
 		if (! pkg) continue;
 		if (! remove_package(pkg)) {
 			errors++;
 		}
 	}
-	for (let pkg in split(options.add, /[,[:space:]]+/)) {
+	for (let pkg in parse_package_list(options.add)) {
 		if (! pkg) continue;
 		if (! add_package(pkg)) {
 			errors++;
@@ -1594,11 +1606,16 @@ function check_defaults()
 	//    1) missing from the installation or
 	//    2) modified/replaced by some other package.
 
+	let ignored = parse_package_list(options.ignored_defaults);
 	let changes = {};
-	let count   = { retained: 0, replaced: 0, removed: 0 };
+	let count   = { ignored: 0, retained: 0, replaced: 0, removed: 0 };
 	for (let pkg in packages.default) {
 		if (pkg in packages.non_upgradable) continue;
-		if (is_installed(pkg))
+		if (pkg in ignored) {
+			count.ignored++;
+			changes[pkg] = L.colorize(L.GREEN, "user ignored");
+		}
+		else if (is_installed(pkg))
 			count.retained++;
 		else {
 			changes[pkg] = what_provides(pkg);
