@@ -1458,20 +1458,20 @@ function list()
 			packages = top_level(SrcType.USER_ONLY);
 			let ctype = "y"; // "y" to install, "m" just build package.
 			for (let pkg in sort(packages)) {
-				L.log(1, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
+				L.log(0, "CONFIG_PACKAGE_%s=%s\n", pkg, ctype);
 			}
 			break;
 
 		case "fs-all":
 			packages = top_level(SrcType.ALL);
-			L.log(1, "%s\n", join(" ", packages));
+			L.log(0, "%s\n", join(" ", packages));
 			break;
 
 		case "fs-user":
 		default:
 			packages = top_level(SrcType.USER_ONLY);
 			push(packages, ...map(removed_defaults(), (pkg) => "-"+pkg));
-			L.log(1, "%s\n", join(" ", packages));
+			L.log(0, "%s\n", join(" ", packages));
 			break;
 	}
 }
@@ -1813,7 +1813,7 @@ function show_blob()
 {
 	let b = blob();
 	if (b) {
-		L.log(1, "%.2J\n", b);
+		L.log(0, "%.2J\n", b);
 	}
 }
 
