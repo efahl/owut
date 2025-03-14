@@ -156,6 +156,7 @@ let arg_defs = proto([
 	{ name: "add",           short: "-a", long: "--add",              action: "storex",    nargs: 1,                 help: "New packages to add to build list." },
 	{ name: "remove",        short: "-r", long: "--remove",           action: "storex",    nargs: 1,                 help: "Installed packages to remove from build list." },
 	{ name: "ignored_defaults",           long: "--ignored-defaults", action: "storex",    nargs: 1,                 help: "List of explicitly ignored default package names." },
+	{ name: "ignored_changes",            long: "--ignored-changes",  action: "storex",    nargs: 1,                 help: "List of explicitly ignored package changes." },
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
 	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
@@ -970,8 +971,16 @@ function apply_pkg_mods()
 	let errors = 0;
 
 	// TODO think about downgrades, i.e., when to.rev_num < from.rev_num...
+
+	let ignored = parse_package_list(options.ignored_changes);
 	let rev_num = build.to.rev_num();
 	for (let chg in packages.changes) {
+		// Upgrades
+		if (chg.source in ignored) {
+			// Allow user to retain old packages on demand, but inform them when changes are skipped.
+			L.log(1, "Ignoring package change %s to %s\n", chg.source, chg.target);
+			continue;
+		}
 		if (chg.revision <= rev_num) {
 			if (chg.target) {
 				if (is_installed(chg.source))
@@ -1001,6 +1010,13 @@ function apply_pkg_mods()
 			errors++;
 		}
 	}
+
+	for (let pkg in ignored) {
+		if (! add_package(pkg)) {
+			errors++;
+		}
+	}
+
 	
 	return errors == 0;
 }
