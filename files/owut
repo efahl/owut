@@ -610,6 +610,7 @@ const pre_bits = regexp("^[-a-z.]+",          "i");
 const ver_bits = regexp("^[0-9.]+",           "i");
 const ver_splt = regexp("[^a-z0-9]",          "i");
 const rev_bits = regexp("-[r]{0,1}([0-9]+)$", "i");
+const apk_bits = regexp("^_[a-z]+([0-9[+])$", "i");
 
 function version_parse(version)
 {
@@ -625,7 +626,7 @@ function version_parse(version)
 	// #1 is only aesthetic and ends up working fine; #2 was fixed in
 	// the apk version cleanup and only appears in 23.05 and earlier.
 
-	let ver, hsh, rev;
+	let ver, hsh, rev, extra;
 
 	let parts = match(version, standard);
 	if (parts) {
@@ -667,6 +668,13 @@ function version_parse(version)
 				push(ver, n);
 				version = substr(version, length(ns)+1);
 			}
+		}
+
+		if (extra = match(version, apk_bits)) {
+			// For apk underscore-named versions:
+			// openssh-ftp-server 9.9_p1-r3 9.9_p2-r1
+			push(ver, int(extra[1]));
+			version = null;
 		}
 
 		// Anything left over must be the "hash" (if we can call it that).
