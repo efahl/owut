@@ -1214,7 +1214,7 @@ function collect_device_info()
 		from: proto({
 			version:    ver_from,               // Full version name currently installed: "SNAPSHOT" or "22.03.1"
 			rev_code:   sysb.release.revision,  // Kernel version that is currently running
-			kver:       sysb.kernel,            // Current build on device
+			kernel:     sysb.kernel,            // Current build on device
 		}, BuildInfo)
 	};
 }
@@ -1251,7 +1251,7 @@ function collect_build_info()
 	build.to = proto({
 		version:    ver_to,  // Full version name of target: "22.03.0-rc4", "23.05.2" or "SNAPSHOT"
 		rev_code:   null,    // Build number from target
-		kver:       null,    // Kernel version of target build, extracted from BOM
+		kernel:     null,    // Kernel version of target build, extracted from BOM
 		fstype:     fstype,  // Requested root FS type
 		img_prefix: null,    // Prefix of image being built
 		img_file:   null,    // Full image name to download and install
@@ -1402,7 +1402,7 @@ function collect_platform()
 	collect_defaults(platform.default_packages, profile.device_packages);
 
 	if ("linux_kernel" in platform) {
-		build.to.kver = platform.linux_kernel.version;
+		build.to.kernel = platform.linux_kernel.version;
 	}
 }
 
@@ -1428,12 +1428,12 @@ function collect_all()
 
 	collect_packages();
 
-	if (! build.to.kver) {
+	if (! build.to.kernel) {
 		// Fall back to pre-"linux_kernel" scanning of packages.
-		build.to.kver = "unknown";
+		build.to.kernel = "unknown";
 		for (let pkg, data in packageDB) {
 			if (data.new_version && index(pkg, "kmod-") == 0 && is_default(pkg)) {
-				build.to.kver = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
+				build.to.kernel = match(data.new_version, /^\d+\.\d+\.\d+/)[0];
 				break;
 			}
 		}
@@ -1508,8 +1508,8 @@ function show_config()
 		`Sys-type       ${device.sutype}\n`
 	);
 	L.log(0,
-		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kver})\n`
-		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kver})${downgrade}\n`
+		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kernel})\n`
+		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kernel})${downgrade}\n`
 	);
 	L.log(1,
 		`Build-FS-type  ${build.to.fstype}\n`
@@ -1788,7 +1788,7 @@ function blob(report)
 
 	let rc = (options.rev_code == "none" ? "" : options.rev_code) ?? build.to.rev_code;
 
-	L.log(log_level, "Request:\n  Version %s %s (kernel %s)\n", build.to.version, rc || "none", build.to.kver);
+	L.log(log_level, "Request:\n  Version %s %s (kernel %s)\n", build.to.version, rc || "none", build.to.kernel);
 	if (build.to.fstype != device.fstype) {
 		L.log(log_level, "  Change file system type from '%s' to '%s'\n", device.fstype, build.to.fstype);
 	}
@@ -1985,7 +1985,7 @@ function download()
 				L.log(2, "  build_at       = %s\n", response.build_at);
 				L.log(1, "  version_number = %s\n", response.version_number);
 				L.log(1, "  version_code   = %s (requested %s)\n", response.version_code, req_version_code);
-				L.log(1, "  kernel_version = %s\n", build.to.kver);
+				L.log(1, "  kernel_version = %s\n", build.to.kernel);
 				L.log(1, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(1, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
 				L.log(3, "  images = %.2J\n",       response.images);
