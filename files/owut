@@ -160,7 +160,7 @@ let arg_defs = proto([
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
 	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
-	{ name: "image",         short: "-i", long: "--image",            action: "store",     nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
+	{ name: "image",         short: "-i", long: "--image",            action: "file",      nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",        short: "-f", long: "--format",           action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",      action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
 	{ name: "poll_interval", short: "-T", long: "--poll-interval",    action: "store_int", nargs: 1, default: 2000,  help: "Poll interval for build monitor, in milliseconds." },

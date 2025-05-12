@@ -1,8 +1,8 @@
 //------------------------------------------------------------------------------
 // argparse.uc - Argument Parser for ucode
-// Copyright (c) 2024 Eric Fahlgren <eric.fahlgren@gmail.com>
+// Copyright (c) 2024-2025 Eric Fahlgren <eric.fahlgren@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-only
-// vim: set noexpandtab softtabstop=8 shiftwidth=8:
+// vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
 // All uses of 'assert' in the argparse module indicate programming errors,
 // and never user input errors.  If you define an argument incorrectly,
@@ -12,7 +12,10 @@
 // To dump the list of actions, try this:
 // $ ucode -p 'import { ArgActions } from "utils.argparse"; keys(ArgActions);'
 
+const VERSION = "%%VERSION%%";
+
 import { cursor } from 'uci';
+import { basename, dirname, realpath } from 'fs';
 
 const isnan = (x) => x != x;
 
@@ -58,6 +61,20 @@ export const ArgActions = {
 
 		if (error) this.usage_short(self, {exit: 1, prefix: `ERROR: ${error}`});
 		self.options[params.name] = value;
+	},
+
+	file: function(self, params) {
+		assert(params.name,  "'file' action requires an option name");
+		assert(params.value, "'file' action requires a value");
+		if (params.value) {
+			let dir = realpath(dirname(params.value));
+			if (! dir) {
+				let msg = `'${params.name}' value '${params.value}' must contain a valid directory path.`;
+				this.usage_short(self, {exit: 1, prefix: `ERROR: ${msg}`});
+			}
+			let file = dir + "/" + basename(params.value);
+			self.options[params.name] = file;
+		}
 	},
 
 	enum: function(self, params) {
