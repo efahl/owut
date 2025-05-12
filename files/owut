@@ -1064,7 +1064,7 @@ function collect_packages()
 
 function initialize_urls()
 {
-	let sysupgrade = uci.get_first("attendedsysupgrade", "server", "url") || default_sysupgrade;
+	let sysupgrade = rtrim(uci.get_first("attendedsysupgrade", "server", "url"), "/") || default_sysupgrade;
 
 	let api        = sysupgrade + "/api/v1";
 	let build      = api + "/build";
