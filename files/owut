@@ -1572,8 +1572,12 @@ function check_updates()
 				break;
 
 			case  2: // New is null.
-				missing++;
-				c2  = L.color(L.RED);
+				if (! is_top_level(pkg) && ! is_default(pkg))
+					c2  = L.color(L.YELLOW);
+				else {
+					missing++;
+					c2  = L.color(L.RED);
+				}
 				new = "missing to-version";
 				break;
 
