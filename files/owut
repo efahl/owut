@@ -1497,6 +1497,7 @@ function show_config()
 {
 	// Pretty-print the major configuration values.
 	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
+	let hash = split(build.to.rev_code, "-")[1];
 	L.log(0,
 		`ASU-Server     ${url.sysupgrade_root}\n`
 		`Upstream       ${url.upstream}\n`
@@ -1512,6 +1513,8 @@ function show_config()
 		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kernel})\n`
 		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kernel})${downgrade}\n`
 	);
+	if (hash)
+	L.log(1, `Build-commit   https://git.openwrt.org/?p=openwrt/openwrt.git;a=shortlog;h=${hash}\n`);
 	L.log(1,
 		`Build-FS-type  ${build.to.fstype}\n`
 		`Build-at       ${build.to.date}\n`
