@@ -4,6 +4,9 @@
 # To see the most recent version of this file, go to:
 #   https://github.com/efahl/owut/blob/main/files/pre-install.sh
 #
+# Details at
+#   https://openwrt.org/docs/guide-user/installation/sysupgrade.owut#pre-install_script
+#
 # Allows the user to inject actions between the download/verify phases of an
 # upgrade and the installation step.  If the script fails, that is returns an
 # exit code != 0, then 'owut' will abort the install process.
@@ -17,6 +20,10 @@
 #
 # config owut 'owut'
 #	option pre_install '/etc/owut.d/pre-install.sh'
+#
+# Note that you should test any changes to this script in a restricted
+# environment using something like:
+#   env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin /etc/owut.d/pre-install.sh
 
 
 # Example 1 - archive the manifest
