@@ -5,7 +5,7 @@
 conf_file="/etc/config/attendedsysupgrade"
 
 if [ ! -e "$conf_file" ]; then
-. /etc/uci-defaults/attendedsysupgrade
+. /etc/uci-defaults/50-attendedsysupgrade
 fi
 
 if [ -z "$(uci get attendedsysupgrade.owut 2> /dev/null)" ]; then
