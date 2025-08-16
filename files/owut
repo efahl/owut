@@ -123,7 +123,6 @@ let commands = {
 
 let _fstypes   = ["squashfs", "ext4", "ubifs", "jffs2"];
 let _fslo      = 1;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v1_build_post_api_v1_build_post
-let _fshi      = 1024;
 let _list_fmts = ["fs-user", "fs-all", "config"];
 
 function parse_rev_code(version_code)
@@ -159,7 +158,7 @@ let arg_defs = proto([
 	{ name: "ignored_changes",            long: "--ignored-changes",  action: "storex",    nargs: 1,                 help: "List of explicitly ignored package changes." },
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
-	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, upper: _fshi, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-${_fshi}).` },
+	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-[server-dependent]).` },
 	{ name: "image",         short: "-i", long: "--image",            action: "file",      nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",        short: "-f", long: "--format",           action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",      action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
@@ -189,6 +188,7 @@ let url;      // See initialize_urls
 let build;    // See collect_all for next three
 let device;
 let release;
+let server_limits;
 
 // Temporary and resource files.
 // We save them all with reasonably recognizable names to aid in debugging.
@@ -1314,6 +1314,15 @@ function collect_overview()
 
 	let overview = dl_overview();
 	url.upstream = overview.upstream_url ?? default_upstream;
+	server_limits = {
+		max_rootfs_size: overview.server?.max_custom_rootfs_size_mb || 1024,
+		max_defaults_length:  overview.server?.max_defaults_length || 20480,
+	};
+	if (options.rootfs_size && options.rootfs_size > server_limits.max_rootfs_size) {
+		L.die("%d is above this server's maximum rootfs partition size of %d MB\n", 
+			options.rootfs_size, server_limits.max_rootfs_size);
+	}
+
 
 	let bad_releases = [ "23.05.1", ];
 
@@ -1463,6 +1472,7 @@ function dump()
 	L.log(-1, '{\n');
 	L.log(-1, '"version": "%s",\n', PROG);
 	L.log(-1, '"options": %.2J,\n', options);
+	L.log(-1, '"server_limits": %.2J,\n', server_limits);
 	L.log( 1, '"url": %.2J,\n', urls);
 	L.log( 1, '"tmp": %.2J,\n', tmps);
 	L.log( 1, '"build": %.2J,\n', build);
@@ -1786,8 +1796,7 @@ function blob(report)
 
 	let init_script;
 	if (options.init_script) {
-		let inits_maxlen = 20480;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v1_build_post_api_v1_build_post
-		let inits_file   = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
+		let inits_file = options.init_script == "-" ? fs.stdin : fs.open(options.init_script);
 		if (! inits_file) {
 			L.err("Init script file '%s' does not exist\n", options.init_script);
 			return null;
@@ -1795,8 +1804,8 @@ function blob(report)
 		else {
 			init_script = inits_file.read("all");
 			inits_file.close();
-			if (length(init_script) > inits_maxlen) {
-				L.err("'%s' is over the %s byte maximum\n", options.init_script, inits_maxlen);
+			if (length(init_script) > server_limits.max_defaults_length) {
+				L.err("'%s' is over the ASU server's %s byte maximum\n", options.init_script, server_limits.max_defaults_length);
 				return null;
 			}
 		}
@@ -1823,6 +1832,10 @@ function blob(report)
 	blob[package_list.type] = package_list[package_list.type];
 
 	if (options.rootfs_size) {
+		if (options.rootfs_size > server_limits.max_rootfs_size) {
+			L.die("This server allows a maximum rootfs partition size of %d MB\n", server_limits.max_rootfs_size);
+		}
+
 		blob.rootfs_size_mb = options.rootfs_size;
 		L.log(log_level, "  ROOTFS_PARTSIZE set to %d MB\n", options.rootfs_size);
 	}
