@@ -1460,17 +1460,17 @@ function dump()
 	let urls = sort(url);
 	let tmps = sort(tmp);
 	let pkgs = sort(packageDB);
-	L.log(0, '{\n');
-	L.log(0, '"version": "%s",\n', PROG);
-	L.log(1, '"options": %.2J,\n', options);
-	L.log(1, '"url": %.2J,\n', urls);
-	L.log(1, '"tmp": %.2J,\n', tmps);
-	L.log(1, '"build": %.2J,\n', build);
-	L.log(0, '"device": %.2J,\n', device);
-	L.log(0, '"release": %.2J%s\n', release, comma(2));
-	L.log(2, '"packageDB": %.2J%s\n', pkgs, comma(3));
-	L.log(3, '"packages": %.2J\n', packages);
-	L.log(0, '}\n');
+	L.log(-1, '{\n');
+	L.log(-1, '"version": "%s",\n', PROG);
+	L.log(-1, '"options": %.2J,\n', options);
+	L.log( 1, '"url": %.2J,\n', urls);
+	L.log( 1, '"tmp": %.2J,\n', tmps);
+	L.log( 1, '"build": %.2J,\n', build);
+	L.log(-1, '"device": %.2J,\n', device);
+	L.log( 0, '"release": %.2J%s\n', release, comma(2));
+	L.log( 2, '"packageDB": %.2J%s\n', pkgs, comma(3));
+	L.log( 3, '"packages": %.2J\n', packages);
+	L.log(-1, '}\n');
 }
 
 function list()
@@ -2146,7 +2146,9 @@ switch (options.command) {
 		break;
 
 	case "dump":
+		L.push(0);
 		collect_all();
+		L.pop();
 		dump();
 		exit_status = EXIT_OK;
 		break;
