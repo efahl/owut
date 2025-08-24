@@ -2149,7 +2149,15 @@ initialize_urls();
 let updates, counts;
 let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
 
-signal("SIGINT", exit);  // Ensure ctrl-C works when inside build loop.
+function terminate()
+{
+	if (uloop.running()) uloop.end();
+	uloop.done();
+	ubus.term();
+	exit(exit_status);
+}
+
+signal("SIGINT", terminate);  // Ensure ctrl-C works when inside build loop.
 
 switch (options.command) {
 	case "versions":
@@ -2247,6 +2255,4 @@ switch (options.command) {
 
 dl_stats.report();
 
-uloop.done();
-ubus.term();
-exit(exit_status);
+terminate();
