@@ -2167,10 +2167,11 @@ switch (options.command) {
 		break;
 
 	case "dump":
-		L.push(0);
+		L.push(-1);
 		collect_all();
 		L.pop();
 		dump();
+		L.push(-1);
 		exit_status = EXIT_OK;
 		break;
 
