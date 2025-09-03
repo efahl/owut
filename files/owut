@@ -42,6 +42,12 @@ const Logger = {
 	RED:    "255;0;0",
 	reset:  "reset",
 
+	clreol: function()
+	{
+		// Clear to end-of-line when appropriate.
+		return this.stdout_is_pipe ? "" : "\033[K";
+	},
+
 	color: function(color_name)
 	{
 		// Suppress colorization when stdout is a pipe.
@@ -72,7 +78,7 @@ const Logger = {
 	{
 		let s = sprintf(fmt, ...args);
 		this._n_lines += length(match(s, /\n/g));
-		return s;
+		return this.clreol() + s;
 	},
 
 	_out: function(prefix, clr, fmt, ...args)
@@ -163,6 +169,7 @@ let arg_defs = proto([
 	{ name: "format",        short: "-f", long: "--format",           action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",      action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
 	{ name: "poll_interval", short: "-T", long: "--poll-interval",    action: "store_int", nargs: 1, default: 2000,  help: "Poll interval for build monitor, in milliseconds." },
+	{ name: "progress_size",              long: "--progress-size",    action: "store_int", nargs: 1, default:    0,  help: "Response content-length above which we report download progress." },
 
 	{ name: "device",                     long: "--device",           action: "store",     nargs: 1, default: null  }, // Undocumented: For testing foreign devices.
 ], ap.ArgParser);
@@ -376,11 +383,21 @@ function _request(url, dst_file, params)
 			}
 			rsp_headers = this.get_headers();
 			rsp_headers.status = this.status().status;
+			rsp_headers.content_length = int(rsp_headers["content-length"] || 0);
+			rsp_headers.content_read = 0;
 		},
 
 		data_read: (cb) => {
 			// uc.read returns null on eof.
-			while (cb.output.write(uc.read() ?? "") > 0) {}
+			let n_read = 0;
+			while ((n_read = cb.output.write(uc.read() ?? "")) > 0) {
+				rsp_headers.content_read += n_read;
+				if (options.progress_size && rsp_headers.content_length > options.progress_size) {
+					let pct_read = 100.0 * rsp_headers.content_read / rsp_headers.content_length;
+					L.log(0, "Download progress: %5.1f%% %8d/%d bytes" + (L.stdout_is_pipe ? "\n" : "\r"),
+						pct_read, rsp_headers.content_read, rsp_headers.content_length);
+				}
+			}
 		},
 
 		data_eof: (cb) => {
