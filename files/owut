@@ -354,6 +354,50 @@ let dl_stats = {
 	},
 };
 
+function glob(pattern, type)
+{
+	// TODO: get this functionality into ucode core or fs.
+	// Optional type is one of "file" or "directory".  Current code
+	// using fs.stat follows links, so "type" can never be "link".
+	// See fs.lstat if you want to find links.
+	//
+	// '**' recursion not supported, but it should be pretty easy.
+
+	let dir = fs.dirname(pattern);
+	let glp = fs.basename(pattern);
+
+	if (! fs.access(dir, "r")) die(`${fs.error()}: ${dir}`);
+
+	let dh = fs.opendir(dir);
+	let globs = [];
+	if (dh) {
+		let entry;
+		while (entry = dh.read()) {
+			if (wildcard(entry, glp)) {
+				let full_path = `${dir}/${entry}`;
+				if (! type || fs.stat(full_path).type == type) {
+					push(globs, full_path);
+				}
+			}
+		}
+	}
+	return globs;
+}
+
+function _get_ca_files()
+{
+	const cert_path = "/etc/ssl/certs";
+	try {
+		return glob(`${cert_path}/*.crt`, "file");
+	}
+	catch (error) {
+		L.wrn("Could not access SSL certificates: %s\n", error);
+		return [];
+	}
+}
+
+let _ca_files = _get_ca_files();
+
 function _request(url, dst_file, params)
 {
 	//  uclient function for simple http requests
@@ -411,7 +455,7 @@ function _request(url, dst_file, params)
 		},
 	});
 
-	if (! uc.ssl_init({verify: false})) {
+	if (! uc.ssl_init({ca_files: _ca_files})) {
 		L.err("ucode-mod-uclient requires an SSL library to function:\n" +
 		"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
 		"  one of the ca-bundle or ca-certificates packages.\n");
