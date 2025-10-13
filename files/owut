@@ -672,7 +672,7 @@ const pre_bits = regexp("^[-a-z.]+",          "i");
 const ver_bits = regexp("^[0-9.]+",           "i");
 const ver_splt = regexp("[^a-z0-9]",          "i");
 const rev_bits = regexp("-[r]{0,1}([0-9]+)$", "i");
-const apk_bits = regexp("^_[a-z]+([0-9[+])$", "i");
+const apk_bits = regexp("^_[a-z]+([0-9]+)$",  "i");
 
 function version_parse(version)
 {
