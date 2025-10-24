@@ -396,7 +396,86 @@ function _get_ca_files()
 	}
 }
 
-let _ca_files = _get_ca_files();
+let _uc_uc = null;
+let _uc_cb = null;
+
+function _get_uclient(url, dst_file)
+{
+	if (! _uc_uc) {
+		_uc_cb = {
+			url:         "",    // For error messages.
+			dst_file:    "",    // Where to put result.
+			output:      null,  // Handle for dst_file.
+			rsp_headers: {},
+
+			_disconnect: (cb) => {
+				if (cb.output) {
+					cb.output.close();
+					cb.output = null;
+				}
+				this.disconnect();
+				uloop.end();
+			},
+
+			header_done: (cb) => {
+				cb.output = fs.open(cb.dst_file, "w");
+				if (! cb.output) {
+					L.err("opening %s: %s\n", cb.dst_file, fs.error());
+					cb._disconnect(cb);
+				}
+				cb.rsp_headers = this.get_headers();
+				cb.rsp_headers.status = this.status().status;
+				cb.rsp_headers.content_length = int(cb.rsp_headers["content-length"] || 0);
+				cb.rsp_headers.content_read = 0;
+			},
+
+			data_read: (cb) => {
+				// uc.read returns null on eof.
+				let n_read = 0;
+				while ((n_read = cb.output.write(this.read() ?? "")) > 0) {
+					cb.rsp_headers.content_read += n_read;
+					if (options.progress_size && cb.rsp_headers.content_length > options.progress_size) {
+						let pct_read = 100.0 * cb.rsp_headers.content_read / cb.rsp_headers.content_length;
+						L.log(0, "Download progress: %5.1f%% %8d/%d bytes" + (L.stdout_is_pipe ? "\n" : "\r"),
+							pct_read, cb.rsp_headers.content_read, cb.rsp_headers.content_length);
+					}
+				}
+			},
+
+			data_eof: (cb) => {
+				cb._disconnect(cb);
+			},
+
+			error: (cb, code) => {
+				L.err("uclient error code=%s\n  This could be due to the server being down or inaccessible, check\n  %s\n", code, cb.url);
+				cb._disconnect(cb);
+			},
+		};
+
+		_uc_uc = uclient.new(url, null, _uc_cb);
+
+		if (! _uc_uc.ssl_init({ca_files: _get_ca_files()})) {
+			L.die("ucode-mod-uclient requires an SSL library to function:\n" +
+			"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
+			"  one of the ca-bundle or ca-certificates packages.\n");
+		}
+
+	}
+
+	_uc_uc.set_url(url);
+	_uc_cb.url      = url;
+	_uc_cb.dst_file = dst_file;
+
+	return _uc_uc;
+}
+
+function _del_uclient()
+{
+	_uc_uc?.free();
+	_uc_uc = null;
+	_uc_cb = null;
+	gc();
+}
 
 function _request(url, dst_file, params)
 {
@@ -415,52 +494,7 @@ function _request(url, dst_file, params)
 	}
 
 	let start = time();
-	let uc;
-	let rsp_headers;
-
-	uc = uclient.new(url, null, {
-		header_done: (cb) => {
-			cb.output = fs.open(dst_file, "w");
-			if (! cb.output) {
-				L.err("opening %s: %s\n", dst_file, fs.error());
-				uloop.end();
-			}
-			rsp_headers = this.get_headers();
-			rsp_headers.status = this.status().status;
-			rsp_headers.content_length = int(rsp_headers["content-length"] || 0);
-			rsp_headers.content_read = 0;
-		},
-
-		data_read: (cb) => {
-			// uc.read returns null on eof.
-			let n_read = 0;
-			while ((n_read = cb.output.write(uc.read() ?? "")) > 0) {
-				rsp_headers.content_read += n_read;
-				if (options.progress_size && rsp_headers.content_length > options.progress_size) {
-					let pct_read = 100.0 * rsp_headers.content_read / rsp_headers.content_length;
-					L.log(0, "Download progress: %5.1f%% %8d/%d bytes" + (L.stdout_is_pipe ? "\n" : "\r"),
-						pct_read, rsp_headers.content_read, rsp_headers.content_length);
-				}
-			}
-		},
-
-		data_eof: (cb) => {
-			cb.output.close();
-			uloop.end();
-		},
-
-		error: (cb, code) => {
-			L.err("uclient error code=%s\n  This could be due to the server being down or inaccessible, check\n  %s\n", code, url);
-			uloop.end();
-		},
-	});
-
-	if (! uc.ssl_init({ca_files: _ca_files})) {
-		L.err("ucode-mod-uclient requires an SSL library to function:\n" +
-		"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
-		"  one of the ca-bundle or ca-certificates packages.\n");
-		return null;
-	}
+	let uc = _get_uclient(url, dst_file);
 
 	if (! uc.connect()) {
 		L.err("Failed to connect\n");
@@ -487,21 +521,21 @@ function _request(url, dst_file, params)
 
 	uloop.run();
 
-	if (rsp_headers) {
+	if (_uc_cb.rsp_headers) {
 		let elapsed = (time() - start) || 0.5;
 		let bytes = fs.stat(dst_file).size;
 		dl_stats.log(url, dst_file, bytes, elapsed);
 
-		L.log(3, "Response headers = %.2J\n", rsp_headers);
+		L.log(3, "Response headers = %.2J\n", _uc_cb.rsp_headers);
 
 		if (options.keep) {
 			let hdrs = fs.open(tmp.rsp_header, "w");
-			hdrs.write(sprintf("%.J\n", rsp_headers));
+			hdrs.write(sprintf("%.J\n", _uc_cb.rsp_headers));
 			hdrs.close();
 		}
 	}
 
-	return { ...uc.status(), type: type, headers: rsp_headers };
+	return { ...uc.status(), type: type, headers: _uc_cb.rsp_headers };
 }
 
 function read_tmp_file(file)
@@ -2203,6 +2237,7 @@ if (options.verbosity > 0 && ! (options.command in ["dump", "blob", "list"])) {
 	arg_defs.show_version();
 }
 
+uloop.init();
 ubus.init();
 
 initialize_urls();
@@ -2212,9 +2247,11 @@ let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
 
 function terminate()
 {
+//	system("grep -E 'VmRSS|VmPeak' /proc/$PPID/status");
 	if (uloop.running()) uloop.end();
 	uloop.done();
 	ubus.term();
+	_del_uclient();
 	exit(exit_status);
 }
 
