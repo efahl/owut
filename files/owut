@@ -436,8 +436,8 @@ function _get_uclient(url, dst_file)
 					cb.rsp_headers.content_read += n_read;
 					if (options.progress_size && cb.rsp_headers.content_length > options.progress_size) {
 						let pct_read = 100.0 * cb.rsp_headers.content_read / cb.rsp_headers.content_length;
-						L.log(0, "Download progress: %5.1f%% %8d/%d bytes" + (L.stdout_is_pipe ? "\n" : "\r"),
-							pct_read, cb.rsp_headers.content_read, cb.rsp_headers.content_length);
+						L.log(0, "Download progress: %5.1f%% %6.2f/%6.2f KB" + (L.stdout_is_pipe ? "\n" : "\r"),
+							pct_read, cb.rsp_headers.content_read/1024., cb.rsp_headers.content_length/1024.);
 					}
 				}
 			},
