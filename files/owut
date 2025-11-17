@@ -425,7 +425,7 @@ function _get_uclient(url, dst_file)
 		_uc_uc = uclient.new(url, null, _uc_cb);
 
 		if (! _uc_uc.ssl_init({ca_files: _get_ca_files()})) {
-			L.die("ucode-mod-uclient requires an SSL library to function:\n" +
+			L.die("owut uses ucode-mod-uclient, which requires an SSL library to function:\n" +
 			"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
 			"  one of the ca-bundle or ca-certificates packages.\n");
 		}
@@ -984,7 +984,7 @@ function collect_defaults(board, device)
 	// Use both board json for its defaults, then add the device-specific
 	// defaults to make one big defaults list.
 
-	let defaults = []; // Must filter out and device-specific removals.
+	let defaults = []; // Must filter out any device-specific removals.
 	for (let pkg in board) {
 		if (! ("-"+pkg in device)) {
 			push(defaults, pkg);
