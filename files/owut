@@ -32,6 +32,7 @@ const Logger = {
 	_levels: [],
 	_level: 0,
 	set_level: function(lvl) { this._level = lvl; },
+	show: function(lvl) { return this._level >= lvl; },
 	push: function(new) { push(this._levels, this._level); this._level = new; },
 	pop: function() { this._level = pop(this._levels); },
 
@@ -91,7 +92,7 @@ const Logger = {
 
 	log: function(level, fmt, ...args)
 	{
-		if (this._level >= level) {
+		if (this.show(level)) {
 			print(this._fmt(fmt, ...args));
 			fs.stdout.flush();
 		}
@@ -1550,7 +1551,7 @@ function collect_all()
 function dump()
 {
 	// Send forth a json representation of all the stuff we've collected.
-	let comma = (l) => L._level >= l ? "," : "";
+	let comma = (l) => L.show(l) ? "," : "";
 	let inst = sort(packages.installed);
 	let urls = sort(url);
 	let tmps = sort(tmp);
