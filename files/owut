@@ -1776,7 +1776,8 @@ function check_pkg_builds()
 		'g'
 	);
 
-	let failed = false;
+	let n_failed = 0;
+	let n_broken = 0;
 
 	let html_blob = dl_failures();
 	let feeds = map(match(html_blob, info), (f) => f[1]);
@@ -1794,11 +1795,12 @@ function check_pkg_builds()
 				let fmt   = `    %-${pkg_name_len}s  %s - %s\n`;
 
 				for (let fail in fails) {
+					n_broken++;
 					let pkg  = fail[1];
 					let date = fail[2];
 					let msg;
 					if (is_installed(pkg)) {
-						failed = true;
+						n_failed++;
 						msg = L.colorize(L.RED, "package installed locally, cannot upgrade");
 					}
 					else {
@@ -1809,13 +1811,13 @@ function check_pkg_builds()
 			}
 		}
 
-		let prefix = failed ?
-			L.colorize(L.RED,   "Package build failures affect this device:") :
-			L.colorize(L.GREEN, "Failures don't affect this device,");
-		L.log(failed ? 0 : 1, "%s details at\n  %s\n\n", prefix, url.failed);
+		let prefix = n_failed ?
+			L.colorize(L.RED,   `${n_failed} of ${n_broken} package build failures affect this device:`) :
+			L.colorize(L.GREEN, `${n_broken} package build failures don't affect this device,`);
+		L.log(n_failed ? 0 : 1, "%s details at\n  %s\n\n", prefix, url.failed);
 	}
 
-	return ! failed;
+	return ! n_failed;
 }
 
 function check_init_script()
