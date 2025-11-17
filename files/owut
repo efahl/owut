@@ -160,6 +160,7 @@ let arg_defs = proto([
 	{ name: "force",                      long: "--force",            action: "set",                 default: false, help: "Force a build even when there are downgrades or no changes." },
 	{ name: "add",           short: "-a", long: "--add",              action: "storex",    nargs: 1,                 help: "New packages to add to build list." },
 	{ name: "remove",        short: "-r", long: "--remove",           action: "storex",    nargs: 1,                 help: "Installed packages to remove from build list." },
+	{ name: "clean_slate",                long: "--clean-slate",      action: "set",                 default: false, help: "Remove all but default packages (READ THE DOCS)." },
 	{ name: "ignored_defaults",           long: "--ignored-defaults", action: "storex",    nargs: 1,                 help: "List of explicitly ignored default package names." },
 	{ name: "ignored_changes",            long: "--ignored-changes",  action: "storex",    nargs: 1,                 help: "List of explicitly ignored package changes." },
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
@@ -977,6 +978,21 @@ function replace_package(old_pkg, new_pkg)
 	return true;
 }
 
+function clean_slate()
+{
+	for (let pkg in keys(packageDB)) {
+		if (! is_default(pkg)) {
+			delete packageDB[pkg];
+		}
+	}
+	for (let pkg in packages.default) {
+		if (is_available(pkg)) {
+			add_package(pkg);
+		}
+	}
+	return true;
+}
+
 //------------------------------------------------------------------------------
 
 function collect_defaults(board, device)
@@ -1016,8 +1032,9 @@ function parse_package_list(opt)
 function apply_pkg_mods()
 {
 	// 1) Handle 'overview.package_changes'.
-	// 2) Apply user-specified removals.
-	// 3) Apply user-specified additions.
+	// 2) Generate any clean-slate request.
+	// 3) Apply user-specified removals.
+	// 4) Apply user-specified additions.
 	//
 	// Package names in changes are already in canonical form.
 	// changes = [
@@ -1060,6 +1077,10 @@ function apply_pkg_mods()
 					errors++;
 			}
 		}
+	}
+
+	if (options.clean_slate) {
+		clean_slate();
 	}
 
 	// Do removals first, so any conflicts are suppressed.
