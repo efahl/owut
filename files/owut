@@ -759,6 +759,12 @@ function pkg_ver_cmp(old, new, strict)
 	if (new == null) return  2;
 	let v1 = version_parse(old);
 	let v2 = version_parse(new);
+
+	// Ensure format changes are respected: jansson 2.14-r3 2.14.1-r1
+	let len = max(length(v1.ver), length(v2.ver));
+	while (length(v1.ver) < len) push(v1.ver, 0);
+	while (length(v2.ver) < len) push(v2.ver, 0);
+
 	for (let i, n1 in v1.ver) {
 		let n2 = v2.ver[i];
 		if (n1 < n2) return -1;
