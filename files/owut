@@ -1,6 +1,6 @@
 #!/usr/bin/ucode -S
 // owut - OpenWrt Upgrade Tool
-// Copyright (c) 2024-2025 Eric Fahlgren <eric.fahlgren@gmail.com>
+// Copyright (c) 2024-2026 Eric Fahlgren <eric.fahlgren@gmail.com>
 // SPDX-License-Identifier: GPL-2.0-only
 // vim: set noexpandtab softtabstop=8 shiftwidth=8 syntax=javascript:
 //------------------------------------------------------------------------------
@@ -1110,7 +1110,6 @@ function apply_pkg_mods()
 		}
 	}
 
-	
 	return errors == 0;
 }
 
@@ -1415,7 +1414,6 @@ function collect_overview()
 		L.die("%d is above this server's maximum rootfs partition size of %d MB\n", 
 			options.rootfs_size, server_limits.max_rootfs_size);
 	}
-
 
 	let bad_releases = [ "23.05.1", ];
 
@@ -1773,9 +1771,12 @@ function check_defaults()
 
 	L.log(1, "Default package analysis:\n");
 	if (length(changes) == 0) {
-		L.log(1, "  No missing or modified default packages.\n\n");
+		L.log(1, "  No missing or modified default packages\n\n");
 	}
 	else {
+		if (! L.show(1))
+			L.log(0, "There are %d missing and %d modified default packages\n", count.removed, count.replaced);
+
 		let wid = pkg_name_len + 2;
 		let fmt = `  %-${wid}s  %s\n`;
 		L.log(1, fmt, "Default", "Provided-by");
@@ -2186,7 +2187,8 @@ function download()
 				if (response.error ) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server error"), response.error);
 				if (response.stdout) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stdout"), response.stdout);
 				if (response.stderr) L.log(0, "%s =\n%s\n", L.colorize(L.RED, "ASU server stderr"), response.stderr);
-				L.err("Build failed with status %s\n", status);
+				L.err("Build failed with status %s (--version-to %s --device %s:%s:%s)\n",
+					status, build.to.version, device.target, device.platform, build.to.fstype);
 				errors++;
 				break;
 		}
@@ -2242,7 +2244,7 @@ ubus.init();
 
 initialize_urls();
 
-let updates, counts;
+let updates, counts, details;
 let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.
 
 function terminate()
@@ -2288,14 +2290,16 @@ switch (options.command) {
 		check_init_script();
 		if (counts.removed)
 			L.wrn("There are %d missing default packages, confirm this is expected before proceeding\n", counts.removed);
+
+		details = L.show(1) ? "\n" : " (re-run with '--verbose' for details)\n";
 		if (exit_status != EXIT_OK)
-			L.err("Checks reveal errors, do not upgrade\n");
+			L.err("Checks reveal errors, do not upgrade%s", details);
 		else if (updates.downgrades)
-			L.wrn("Checks reveal package downgrades, upgrade still possible with '--force'\n");
+			L.wrn("Checks reveal package downgrades, upgrade still possible with '--force'%s", details);
 		else if (updates.changes == 0)
-			L.log(0, "There are no changes, upgrade not necessary\n");
+			L.log(0, "There are no changes, upgrade not necessary%s", details);
 		else
-			L.log(0, "It is safe to proceed with an upgrade\n");
+			L.log(0, "It is safe to proceed with an upgrade%s", details);
 		break;
 
 	case "blob":
@@ -2310,24 +2314,26 @@ switch (options.command) {
 		collect_all();
 		show_config();
 		updates = check_updates();
+
+		details = L.show(1) ? "\n" : " (run 'owut check --verbose' for details)\n";
 		if (updates.downgrades && ! options.force) {
-			L.err("Update checks reveal package downgrades, re-run with '--force' to proceed\n");
+			L.err("Update checks reveal package downgrades%s", details);
 			break;
 		}
 		if (updates.missing) {
-			L.err("Update checks reveal errors, can't proceed\n");
+			L.err("Update checks reveal errors, can't proceed%s", details);
 			break;
 		}
 		counts = check_defaults();
 		if (! check_pkg_builds()) {
-			L.err("Package build checks reveal errors, can't proceed\n");
+			L.err("Package build checks reveal errors, can't proceed%s", details);
 			break;
 		}
 		if (counts.removed)
-			L.wrn("There are %d missing default packages, confirm this is expected before proceeding\n", counts.removed);
+			L.wrn("There are %d missing default packages, confirm this is expected before proceeding%s", counts.removed, details);
 		if (updates.changes == 0) {
 			if (options.force)
-				L.wrn("Forcing build with no changes\n");
+				L.wrn("Forcing build with no changes%s", details);
 			else {
 				L.log(0, "There are no changes to %s (see '--force')\n", options.command);
 				exit_status = EXIT_OK;
