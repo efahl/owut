@@ -2080,7 +2080,7 @@ function download()
 		}
 
 		let t_now = time();
-		let highlight = substr(response.detail, 0, 6) == "Error:" ? L.RED : L.GREEN;
+		let highlight = status in [200, 202] ? L.GREEN : L.RED;
 		L.log(0, "Status:   %s", L.colorize(highlight, response.detail));
 		switch (response.detail) {
 			case "queued":
