@@ -1424,6 +1424,9 @@ function collect_overview()
 	};
 
 	for (let branch_id, data in overview.branches) {
+		if ("enabled" in data && ! data.enabled) continue;
+		if (! length(data.targets)) continue;
+
 		release.branches[branch_id] = {
 			latest:   null,  // Determined below.
 			versions: filter(data.versions, (v) => !(v in bad_releases)),
