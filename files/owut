@@ -371,6 +371,12 @@ function _get_ca_files()
 let _uc_uc = null;
 let _uc_cb = null;
 
+function _url_scheme(url)
+{
+	let m = match(url, /^([A-Za-z][A-Za-z0-9+.-]*):\/\//);
+	return m ? m[1] : null;
+}
+
 function _get_uclient(url, dst_file)
 {
 	if (! _uc_uc) {
@@ -437,7 +443,30 @@ function _get_uclient(url, dst_file)
 
 	}
 
-	_uc_uc.set_url(url);
+	let scheme = _url_scheme(url);
+	if (! scheme || ! match(scheme, /^https?$/i)) {
+		L.die("Invalid request URL (expected http or https):\n  %s\n", url);
+	}
+
+	let proxy = null;
+	if (match(scheme, /^https$/i)) {
+		proxy = getenv("https_proxy");
+	} else {
+		proxy = getenv("http_proxy");
+	}
+
+	if (proxy) {
+		let proxy_scheme = _url_scheme(proxy);
+		if (! proxy_scheme || ! match(proxy_scheme, /^https?$/i)) {
+			L.die("Invalid proxy URL (expected http or https):\n  %s\n", proxy);
+		}
+
+		_uc_uc.set_url(proxy_url);
+		_uc_uc.set_proxy_url(url);
+	} else {
+		_uc_uc.set_url(url);
+	}
+
 	_uc_cb.url      = url;
 	_uc_cb.dst_file = dst_file;
 
