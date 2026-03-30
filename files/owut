@@ -184,7 +184,7 @@ arg_defs.set_bookends(
 	`Questions and discussion\n`
 	`  ${forum_url}\n\n`
 	`Issues and bug reports\n`
-        `  ${issue_url}\n\n`
+	`  ${issue_url}\n\n`
 );
 
 let options = arg_defs.parse(null, {attendedsysupgrade: "owut"});
@@ -399,6 +399,9 @@ function _get_uclient(url, dst_file)
 				cb.rsp_headers.status = this.status().status;
 				cb.rsp_headers.content_length = int(cb.rsp_headers["content-length"] || 0);
 				cb.rsp_headers.content_read = 0;
+				if (! this.redirect(cb)) {
+					L.log(1, "Redirected to %s...\n", cb.rsp_headers.location);
+				}
 			},
 
 			data_read: (cb) => {
