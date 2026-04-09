@@ -345,13 +345,13 @@ let dl_stats = {
 		this.count++;
 
 		let Mbits = this.Mbits(bytes);
-		L.log(2, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, file, bytes, Mbits/time);
+		L.log(3, "Downloaded %s to %s (%dB at %.3f Mbps)\n", url, file, bytes, Mbits/time);
 	},
 
 	report: function() {
 		if (this.count > 0) {
 			let Mbps = this.Mbits(this.bytes) / this.time;
-			L.log(2, "Downloaded %d files, %d bytes at %.3f Mbps\n", this.count, this.bytes, Mbps);
+			L.log(3, "Downloaded %d files, %d bytes at %.3f Mbps\n", this.count, this.bytes, Mbps);
 		}
 	},
 };
@@ -530,7 +530,7 @@ function _request(url, dst_file, params)
 		let bytes = fs.stat(dst_file).size;
 		dl_stats.log(url, dst_file, bytes, elapsed);
 
-		L.log(3, "Response headers = %.2J\n", _uc_cb.rsp_headers);
+		L.log(4, "Response headers = %.2J\n", _uc_cb.rsp_headers);
 
 		if (options.keep) {
 			let hdrs = fs.open(tmp.rsp_header, "w");
@@ -1684,8 +1684,11 @@ function check_updates()
 
 	L.log(1, "Package version changes:\n");
 	let w0 = pkg_name_len + 2;
-	let w1 = max(...map(values(packageDB), (p) => length(p.version)));
-	let f0 = `  %-${w0}s  %s%-${w1}s %s%s%s\n`;
+	let w1 = 0;
+	for (let pkg, v in packageDB) {
+		if (! (pkg in packages.non_upgradable)) w1 = max(w1, length(v.version));
+	}
+	let f0 = `  %-${w0}s  %s%-${w1}s %s%s%s%s\n`;
 	let new = '';
 	for (let pkg, data in sort(packageDB)) {
 		if (pkg in packages.non_upgradable) continue;
@@ -1699,6 +1702,7 @@ function check_updates()
 		changes++;
 		let c1 = "";
 		let c2 = "";
+		let suffix = ""; // Downgrade or whatever
 		switch (cmp) {
 			case -2: // Old is null.
 				// This happens when you '--add' a new package.
@@ -1712,6 +1716,7 @@ function check_updates()
 			case  1:
 				downgrades++;
 				c2 = L.color(L.RED);
+				suffix = " (downgrade)";
 				break;
 
 			case  2: // New is null.
@@ -1728,9 +1733,10 @@ function check_updates()
 				// They are different (hashes usually), but we
 				// can't tell if one is older than the other.
 				c2 = L.color(L.YELLOW);
+				suffix = " (indeterminate)";
 				break;
 		}
-		L.log(1, f0, pkg, c1, old, c2, new, L.color(L.reset));
+		L.log(1, f0, pkg, c1, old, c2, new, suffix, L.color(L.reset));
 	}
 
 	if (missing) {
@@ -1851,6 +1857,7 @@ function check_pkg_builds()
 		L.log(1, "There are currently package build failures for %s %s:\n", build.to.version, device.arch);
 
 		for (let feed in feeds) {
+			let shown = 0;
 			L.log(1, "  Feed: %s\n", feed);
 			html_blob = dl_failures(feed);
 			if (html_blob) {
@@ -1861,15 +1868,21 @@ function check_pkg_builds()
 					n_broken++;
 					let pkg  = fail[1];
 					let date = fail[2];
-					let msg;
+					let msg, level;
 					if (is_installed(pkg)) {
 						n_failed++;
 						msg = L.colorize(L.RED, "package installed locally, cannot upgrade");
+						level = 1;
 					}
 					else {
 						msg = "not installed";
+						level = 2;
 					}
-					L.log(1, fmt, pkg, date, msg);
+					L.log(level, fmt, pkg, date, msg);
+					if (L.show(level)) shown++;
+				}
+				if (shown != length(fails)) {
+					L.log(1, "    %d unshown\n", length(fails)-shown);
 				}
 			}
 		}
@@ -2148,8 +2161,8 @@ function download()
 				L.log(1, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(1, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
 				L.log(3, "  images = %.2J\n",       response.images);
-				L.log(4, "  build_cmd = %.2J\n",    response.build_cmd);
-				L.log(4, "  manifest = %.2J\n",     response.manifest);
+				L.log(3, "  build_cmd = %.2J\n",    response.build_cmd);
+				L.log(3, "  manifest = %.2J\n",     response.manifest);
 				L.log(1, "\n");
 
 				let image = select_image(response.images);
