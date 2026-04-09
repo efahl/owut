@@ -368,14 +368,39 @@ function _get_ca_files()
 	}
 }
 
+//------------------------------------------------------------------------------
+
+function getenv_ic(envar)
+{
+	return getenv(envar) || getenv(uc(envar));
+}
+
+const url_parts = regexp("^([^:]+)://([^/]+)/?(.*)", "i");
+function url_parse(url)
+{
+	let parts = match(url, url_parts);
+	return ! parts ? null : {
+		scheme: parts[1],
+		host:   parts[2], // Includes any port spec.
+		path:   parts[3],
+	};
+}
+
+function get_proxy_url(url)
+{
+	let parts = url_parse(url);
+
+	let no_proxy = split(getenv_ic("no_proxy"), ",");
+	if (no_proxy && parts.host in no_proxy)
+		return null;
+
+	return getenv_ic(`${parts.scheme}_proxy`);
+}
+
+//------------------------------------------------------------------------------
+
 let _uc_uc = null;
 let _uc_cb = null;
-
-function _url_scheme(url)
-{
-	let m = match(url, /^([A-Za-z][A-Za-z0-9+.-]*):\/\//);
-	return m ? m[1] : null;
-}
 
 function _get_uclient(url, dst_file)
 {
@@ -440,33 +465,16 @@ function _get_uclient(url, dst_file)
 			"  Please install one of the libustream-*[ssl|tls] packages as well as\n" +
 			"  one of the ca-bundle or ca-certificates packages.\n");
 		}
-
 	}
 
-	let scheme = _url_scheme(url);
-	if (! scheme || ! match(scheme, /^https?$/i)) {
-		L.die("Invalid request URL (expected http or https):\n  %s\n", url);
-	}
-
-	let proxy = null;
-	if (match(scheme, /^https$/i)) {
-		proxy = getenv("https_proxy");
-	} else {
-		proxy = getenv("http_proxy");
-	}
-
-	if (proxy) {
-		let proxy_scheme = _url_scheme(proxy);
-		if (! proxy_scheme || ! match(proxy_scheme, /^https?$/i)) {
-			L.die("Invalid proxy URL (expected http or https):\n  %s\n", proxy);
-		}
-
+	let proxy_url = get_proxy_url(url);
+	if (! proxy_url)
+		_uc_uc.set_url(url);
+	else {
+		L.log(2, "Using proxy_url '%s'\n", proxy_url);
 		_uc_uc.set_url(proxy_url);
 		_uc_uc.set_proxy_url(url);
-	} else {
-		_uc_uc.set_url(url);
 	}
-
 	_uc_cb.url      = url;
 	_uc_cb.dst_file = dst_file;
 
