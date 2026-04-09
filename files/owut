@@ -409,7 +409,7 @@ function _get_uclient(url, dst_file)
 			url:         "",    // For error messages.
 			dst_file:    "",    // Where to put result.
 			output:      null,  // Handle for dst_file.
-			rsp_headers: {},
+			rsp_headers: null,
 
 			_disconnect: (cb) => {
 				if (cb.output) {
