@@ -1302,7 +1302,8 @@ function collect_device_info()
 	}
 
 	let target   = sysb.release.target;
-	let platform = replace(sysb.board_name, /,/, "_");
+	let board_name = sysb.board_name;
+	let profile = replace(board_name, /,/, "_");
 	let ver_from = sysb.release.version;
 	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade (or trx or lxl or ???)
 
@@ -1334,11 +1335,12 @@ function collect_device_info()
 	}
 
 	device = {
-		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
-		target:   target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from system board
-		platform: platform,          // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
-		fstype:   sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
-		sutype:   sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
+		arch:       null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
+		target:     target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from system board
+		board_name: board_name,        // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
+		profile:    profile,           // "generic", "tplink_archer-c7-v4" or "linksys_e8450-ubi", used to match profiles in profiles.json
+		fstype:     sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
+		sutype:     sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
 	};
 
 	build = {
@@ -1399,15 +1401,15 @@ function age(from)
 	return sprintf("~%.0f days ago", hours / 24.0);
 }
 
-function complete_build_info(profile, board)
+function complete_build_info(profiles_json)
 {
-	let dt = gmtime(board.source_date_epoch);
-	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ (%s)", dt.year, dt.mon, dt.mday, dt.hour, dt.min, dt.sec, age(board.source_date_epoch));
-	build.to.rev_code   = board.version_code;
-	build.to.img_prefix = profile.image_prefix;
+	let dt = gmtime(profiles_json.source_date_epoch);
+	build.to.date       = sprintf("%4d-%02d-%02dT%02d:%02d:%02dZ (%s)", dt.year, dt.mon, dt.mday, dt.hour, dt.min, dt.sec, age(profiles_json.source_date_epoch));
+	build.to.rev_code   = profiles_json.version_code;
+	build.to.img_prefix = profiles_json.profiles[device.profile].image_prefix;
 
 	// First, only allow legitimate "sysupgrade" types through.
-	let images = filter(profile.images, (img) => img.filesystem && img.filesystem != "initramfs" && ! match(img.type, /factory/));
+	let images = filter(profiles_json.profiles[device.profile].images, (img) => img.filesystem && img.filesystem != "initramfs" && ! match(img.type, /factory/));
 
 	let valid_fstypes = uniq(sort(map(images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
@@ -1425,7 +1427,7 @@ function complete_build_info(profile, board)
 			device.sutype = valid_sutypes[0];
 		else
 			L.bug("%s:%s Sysupgrade type '%s' should be one of %s\n",
-				device.target, device.platform, device.sutype, valid_sutypes);
+				device.target, device.profile, device.sutype, valid_sutypes);
 	}
 
 	for (let img in images) {
@@ -1522,16 +1524,19 @@ function collect_platform()
 		L.die("Unsupported target '%s'\n", device.target);
 	}
 
-	if (! (device.platform in keys(platform.profiles))) {
+	if (! (device.profile in keys(platform.profiles))) {
+		// *Although in most cases the board_name (sysinfo:acpi name, dts compatible, custom name) is the
+		// "same" as the profile, and the "sanitization" would be enough to get the proper profile name.
+		// The common/general case is that devices sent any string from the SUPPORTED_DEVICES list and we
+		// need to translate to a proper profile name used by ImageBuilders.
 		// This is a mapped profile, e.g.: raspberrypi,model-b-plus -> rpi
 		let found = false;
-		for (let real_platform, data in platform.profiles) {
-			for (let alias in data.supported_devices) {
-				alias = replace(alias, ",", "_");
-				if (device.platform == alias) {
+		for (let profile, data in platform.profiles) {
+			for (let board_name in data.supported_devices) {
+				if (device.board_name == board_name) {
 					found = true;
-					L.log(2, "Mapping platform %s to %s\n", device.platform, real_platform);
-					device.platform = real_platform;
+					L.log(2, "Mapping platform, board_name to profile: %s to %s\n", device.board_name, profile);
+					device.profile = profile;
 					break;
 				}
 			}
@@ -1539,17 +1544,16 @@ function collect_platform()
 		}
 		if (! found) {
 			if ("generic" in keys(platform.profiles))
-				device.platform = "generic";
+				device.profile = "generic";
 			else
-				L.die("Unsupported profile: %s\n  Valid profiles are %s\n", device.platform, keys(platform.profiles));
+				L.die("Unsupported profile: %s\n  Valid profiles are %s\n", device.profile, keys(platform.profiles));
 		}
 	}
 
-	let profile = platform.profiles[device.platform];
 	device.arch = platform.arch_packages;
 
-	complete_build_info(profile, platform);
-	collect_defaults(platform.default_packages, profile.device_packages);
+	complete_build_info(platform);
+	collect_defaults(platform.default_packages, platform.profiles[device.profile].device_packages);
 
 	if ("linux_kernel" in platform) {
 		build.to.kernel = platform.linux_kernel.version;
@@ -1653,7 +1657,8 @@ function show_config()
 		`ASU-Server     ${url.sysupgrade_root}\n`
 		`Upstream       ${url.upstream}\n`
 		`Target         ${device.target}\n`
-		`Profile        ${device.platform}\n`
+		`Profile        ${device.profile}\n`
+		`Board          ${device.board_name}\n`
 		`Package-arch   ${device.arch}\n`
 	);
 	L.log(1,
@@ -1972,7 +1977,7 @@ function blob(report)
 	let blob = {
 		client:        PROG,
 		target:        device.target,
-		profile:       device.platform,  // sanitized board name
+		profile:       device.profile,  // sanitized board name
 
 		version:       build.to.version,
 		version_code:  rc,
