@@ -1408,6 +1408,9 @@ function complete_build_info(profile, board)
 
 	// First, only allow legitimate "sysupgrade" types through.
 	let images = filter(profile.images, (img) => img.filesystem && img.filesystem != "initramfs" && ! match(img.type, /factory/));
+  if (length(images) == 0) {
+    L.die("Cannot find any legitimate 'sysupgrade' image (not 'initramfs' nor 'factory') for that board on the download server.\n");
+  }
 
 	let valid_fstypes = uniq(sort(map(images, (img) => img.filesystem)));
 	if (! (build.to.fstype in valid_fstypes)) {
