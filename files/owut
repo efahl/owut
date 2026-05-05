@@ -1231,7 +1231,7 @@ function show_versions(check_version_to)
 
 	let branches  = release.branches;
 	let installed = build.from.version;
-	let selected  = build.to?.version ?? options.version_to;
+	let selected  = build.to?.version ?? options.version_to ?? installed;
 	let found_to  = false;
 
 	for (let branch, details in branches) {
@@ -1368,6 +1368,10 @@ function collect_build_info()
 	else {
 		// Any unspecified non-snapshot gets latest from same branch.
 		let b = branch_of(build.from.version);
+		if (! (b in release.branches)) {
+			show_versions(false);
+			exit(EXIT_ERR);
+		}
 		ver_to = release.branches[b].latest;
 	}
 
