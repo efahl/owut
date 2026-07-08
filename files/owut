@@ -1132,8 +1132,14 @@ function apply_pkg_mods()
 	// Do removals first, so any conflicts are suppressed.
 	for (let pkg in parse_package_list(options.remove)) {
 		if (! pkg) continue;
-		if (! remove_package(pkg)) {
-			errors++;
+		let pkg_info = split(pkg, "/");
+		pkg = pkg_info[0];
+		let ignore = pkg_info[1] == "if-installed";
+		if (! remove_package(pkg, ignore)) {
+			if (! ignore)
+				errors++;
+			else if (L.show(1))
+				L.wrn("Package '%s' not installed, package removal ignored\n", pkg);
 		}
 	}
 	for (let pkg in parse_package_list(options.add)) {
