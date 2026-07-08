@@ -1,6 +1,6 @@
 # owut - OpenWrt Upgrade Tool
 
-`owut` is command line tool that upgrades your router's firmware.  It creates custom images of OpenWrt using the [sysupgrade server](https://sysupgrade.openwrt.org) and installs them, retaining all of your currently installed packages and configuration. 
+`owut` is command line tool that upgrades your router's firmware.  It creates custom images of OpenWrt using the [sysupgrade server](https://sysupgrade.openwrt.org) and installs them, retaining all of your currently installed packages and configuration.
 
 Follow along or participate in the [owut package discussion](https://forum.openwrt.org/t/owut-openwrt-upgrade-tool/200035) on the OpenWrt forum.
 
@@ -25,7 +25,7 @@ opkg update
 opkg install attendedsysupgrade-common rpcd-mod-file ucode ucode-mod-fs \
              ucode-mod-ubus ucode-mod-uci ucode-mod-uclient ucode-mod-uloop
 
-[ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/ 
+[ ! -d /usr/share/ucode/utils/ ] && mkdir -p /usr/share/ucode/utils/
 wget -O /usr/share/ucode/utils/argparse.uc https://raw.githubusercontent.com/efahl/owut/main/files/argparse.uc
 wget -O /usr/bin/owut https://raw.githubusercontent.com/efahl/owut/main/files/owut
 hash="$(wget -q -O - https://api.github.com/repos/efahl/owut/commits/main | jsonfilter -e '$.sha' | cut -c-8)"

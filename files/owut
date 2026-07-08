@@ -1460,7 +1460,7 @@ function collect_overview()
 		max_defaults_length:  overview.server?.max_defaults_length || 20480,
 	};
 	if (options.rootfs_size && options.rootfs_size > server_limits.max_rootfs_size) {
-		L.die("%d is above this server's maximum rootfs partition size of %d MB\n", 
+		L.die("%d is above this server's maximum rootfs partition size of %d MB\n",
 			options.rootfs_size, server_limits.max_rootfs_size);
 	}
 
