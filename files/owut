@@ -242,6 +242,61 @@ let packages = {  // Dictionary of package lists.
 	replaced:  {}, // Log of replacements and removals due to 'package_changes'.
 };
 
+// Repositories
+const repositories_mode = uci.get('attendedsysupgrade', 'owut', 'repositories_mode') || "append";
+const repository_aliases = uci.get('attendedsysupgrade', 'owut', 'repository_aliases') || [];
+
+let repositories = {};
+let repository_keys = [];
+
+const repository_dir = "/etc/apk/repositories.d";
+const repository_keys_dir = "/etc/apk/keys";
+let repository_files = fs.lsdir(repository_dir);
+const repository_key_files = fs.lsdir(repository_keys_dir);
+let repository_list = [];
+
+if (repository_files) {
+	if (repositories_mode == "append") {
+		repository_files = filter(repository_files, (i) => i != "distfeeds.list");
+	}
+
+	for (let file in repository_files) {
+		let file_path = repository_dir + '/' + file;
+
+		let stat = fs.stat(file_path);
+		if (stat && stat.type === 'file') {
+			let content = fs.readfile(file_path);
+			if (content) {
+				let lines = split(content, "\n");
+				for (let line in lines) {
+					let valid = match(trim(line), /^http/);
+					if (valid) {
+						push(repository_list, line);
+					}
+				}
+			}
+		}
+	}
+}
+
+let use_repositories = length(repository_list) != 0;
+
+if (use_repositories) {
+	if (repository_key_files) {
+		for (let file in repository_key_files) {
+			let file_path = repository_keys_dir + '/' + file;
+
+			let stat = fs.stat(file_path);
+			if (stat && stat.type === 'file') {
+				let content = fs.readfile(file_path);
+				if (content) {
+					push(repository_keys, content)
+				}
+			}
+		}
+	}
+}
+
 //------------------------------------------------------------------------------
 
 const ubus = {
@@ -859,6 +914,65 @@ function branch_of(version)
 	return m ? m[0] : "";
 }
 
+function generate_repositories() {
+	for (let index, repo in repository_list) {
+		let version_from_rx = regexp(build.from.version);
+		let branch_from_rx = regexp(branch_of(build.from.version));
+
+		if (repositories_mode == "replace") {
+			if (build.to.version == "SNAPSHOT") {
+				repo = replace(repo, regexp("/releases/.[^/]*/"), "/snapshots/");
+			} 
+
+			const kmods_path = `${build.to.kernel}-${build.to.kernel_release}-${build.to.kernel_vermagic}`;
+			repo = replace(repo, regexp("/kmods/.[^/]*/"), "/kmods/"+kmods_path+"/");
+			L.log(4, "Adjust kernel modules url': %s\n", repo);			
+		}
+
+		// The repository contains a reference of the from version
+		if (match(repo, version_from_rx)) {
+			repo = replace(repo, build.from.version, build.to.version);
+			L.log(4, "Repository match 'version_from', replaced with 'version_to': %s\n", repo);
+
+		// The repository contains a reference of the from branch
+		} else if (match(repo, branch_from_rx)) {
+			repo = replace(repo, branch_of(build.from.version), branch_of(build.to.version));
+			L.log(4, "Repository match 'branch_from', replaced with 'branch_to': %s\n", repo);
+		}
+
+		for (let alias in repository_aliases) {
+			let pattern = split(alias, " ")[0];
+			let replacement = split(alias, " ")[1];
+			let pattern_rx = regexp(pattern);
+
+			if (match(repo, pattern_rx)) {
+				repo = replace(repo, pattern_rx, replacement)
+			}
+		}
+
+		repositories[index] = repo;
+		repository_list[index] = repo;
+	}
+}
+
+function dl_package_versions_from_repositories()
+{
+	let repositories_packages = {};
+	generate_repositories();
+
+	for (let index, repo in repository_list) {
+		let url = replace(repo, "packages.adb", "index.json");
+		let json = dl_json(url, "/tmp/owut-repositories-packages-"+index+".json", true);
+		repositories_packages = sort({ ...(repositories_packages ?? []), ...(json?.packages ?? []) });
+	}
+
+	if (repositories_mode == "append") {
+		return sort({ ...dl_package_versions(), ...(repositories_packages ?? []) });
+	} else if (repositories_mode == "replace") {
+		return sort({...(repositories_packages ?? []) });
+	}
+}
+
 //------------------------------------------------------------------------------
 //-- Package management --------------------------------------------------------
 
@@ -1181,7 +1295,11 @@ function collect_packages()
 	packages.installed = installed.packages;
 	packages.top_level = sort(keys(top_level.packages));
 
-	packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
+	if (use_repositories) {
+		packages.available = dl_package_versions_from_repositories() ?? {};
+	} else {
+		packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
+	}
 
 	for (let pkg, ver in packages.installed) {
 		packageDB[pkg] = {
@@ -1563,6 +1681,8 @@ function collect_platform()
 
 	if ("linux_kernel" in platform) {
 		build.to.kernel = platform.linux_kernel.version;
+		build.to.kernel_release = platform.linux_kernel.release;
+		build.to.kernel_vermagic = platform.linux_kernel.vermagic;
 	}
 }
 
@@ -2004,6 +2124,12 @@ function blob(report)
 	if (init_script) {
 		blob.defaults = init_script;
 		L.log(log_level, "  Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
+	}
+
+	if (use_repositories) {
+		blob.repositories_mode = repositories_mode;
+		blob.repositories = repositories;
+		blob.repository_keys = repository_keys;
 	}
 
 	return blob;
