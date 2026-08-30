@@ -1410,6 +1410,39 @@ const BuildInfo = {
 	},
 };
 
+function fix_image_type(target, sutype, efi_check)
+{
+	if (! sutype) {
+		// Generic efi targets are:
+		//   armsr     - EFI-boot only, see https://github.com/efahl/owut/issues/21
+		//   loongarch - EFI-boot only
+		//   x86       - EFI- or BIOS-boot
+		let efi_capable = match(target, /^(armsr|loongarch|x86)\//);
+		if (efi_check == null) {
+			efi_check = efi_capable ? "check" : "no";  // one of: force, no, check
+		}
+
+		// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
+		// Wait, is there also "factory"??? See asu/build.py abt line 246
+		if (efi_capable) {
+			// No distinction between "factory" and "sysupgrade" for the generic devices.
+			sutype = "combined";
+		}
+		else {
+			// Could be that sutype = "sdcard" for some devices, but
+			// assume it is "sysupgrade", which might be wrong.  We'll
+			// fix this after we get the profiles for the device, see
+			// 'collect_all'.
+			sutype = "sysupgrade";
+		}
+
+		if (efi_check == "force" || (efi_check == "check" && fs.access("/sys/firmware/efi"))) {
+			sutype = `${sutype}-efi`;
+		}
+	}
+	return sutype;
+}
+
 function collect_device_info()
 {
 	let sysb = ubus.call("system", "board");
@@ -1430,34 +1463,7 @@ function collect_device_info()
 	let target   = sysb.release.target;
 	let platform = replace(sysb.board_name, /,/, "_");
 	let ver_from = sysb.release.version;
-	let sutype; // Sysupgrade type: combined, combined-efi, sdcard or sysupgrade (or trx or lxl or ???)
-
-	// Generic efi targets are:
-	//   armsr     - EFI-boot only, see https://github.com/efahl/owut/issues/21
-	//   loongarch - EFI-boot only
-	//   x86       - EFI- or BIOS-boot
-	let efi_capable = match(target, /^(armsr|loongarch|x86)\//);
-	if (efi_check == null) {
-		efi_check = efi_capable ? "check" : "no";  // one of: force, no, check
-	}
-
-	// See also, auc.c:1657 'select_image' for changing installed fstype to requested one.
-	// Wait, is there also "factory"??? See asu/build.py abt line 246
-	if (efi_capable) {
-		// No distinction between "factory" and "sysupgrade" for the generic devices.
-		sutype   = "combined";
-	}
-	else {
-		// Could be that sutype = "sdcard" for some devices, but
-		// assume it is "sysupgrade", which might be wrong.  We'll
-		// fix this after we get the profiles for the device, see
-		// 'collect_all'.
-		sutype   = "sysupgrade";
-	}
-
-	if (efi_check == "force" || (efi_check == "check" && fs.access("/sys/firmware/efi"))) {
-		sutype = `${sutype}-efi`;
-	}
+	let sutype   = fix_image_type(target, sysb.image_type, efi_check);
 
 	device = {
 		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
@@ -1791,7 +1797,7 @@ function show_config()
 	);
 	L.log(1,
 		`Root-FS-type   ${device.fstype}\n`
-		`Sys-type       ${device.sutype}\n`
+		`Image-type     ${device.sutype}\n`
 	);
 	L.log(0,
 		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kernel})\n`
