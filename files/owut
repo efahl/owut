@@ -242,7 +242,9 @@ let packages = {  // Dictionary of package lists.
 	replaced:  {}, // Log of replacements and removals due to 'package_changes'.
 };
 
+//------------------------------------------------------------------------------
 // Repositories
+
 const repositories_mode = uci.get('attendedsysupgrade', 'owut', 'repositories_mode') || "append";
 const repository_aliases = uci.get('attendedsysupgrade', 'owut', 'repository_aliases') || [];
 
@@ -1460,6 +1462,7 @@ function collect_device_info()
 	device = {
 		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
 		target:   target,            // "x86/64" or "ath79/generic" or "mediatek/mt7622", from system board
+		board:    sysb.board_name,   // Raw board name from system
 		platform: platform,          // "generic" (for x86) or "tplink,archer-c7-v4" or "linksys,e8450-ubi"
 		fstype:   sysb.rootfs_type,  // "ext4" or "squashfs", what is actually present now
 		sutype:   sutype,            // Sysupgrade type, combined, combined-efi or sysupgrade or sdcard
@@ -1783,7 +1786,7 @@ function show_config()
 		`ASU-Server     ${url.sysupgrade_root}\n`
 		`Upstream       ${url.upstream}\n`
 		`Target         ${device.target}\n`
-		`Profile        ${device.platform}\n`
+		`Profile        ${device.platform} (${device.board})\n`
 		`Package-arch   ${device.arch}\n`
 	);
 	L.log(1,
