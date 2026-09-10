@@ -957,6 +957,38 @@ function generate_repositories() {
 	}
 }
 
+function package_versions_from_index(index)
+{
+	// OpenWrt package indexes can be either:
+	//   { packages: [{ name, version, ... }, ...] }
+	// or a direct name->version mapping.
+	// Normalize both into a { pkg: version } object.
+	if (! index) return {};
+
+	if (type(index) == "array") {
+		let out = {};
+		for (let pkg in index) {
+			if (pkg?.name && pkg?.version)
+				out[pkg.name] = pkg.version;
+		}
+		return out;
+	}
+
+	if (index.packages) {
+		if (type(index.packages) == "array") {
+			let out = {};
+			for (let pkg in index.packages) {
+				if (pkg?.name && pkg?.version)
+					out[pkg.name] = pkg.version;
+			}
+			return out;
+		}
+		return index.packages;
+	}
+
+	return index;
+}
+
 function dl_package_versions_from_repositories()
 {
 	let repositories_packages = {};
@@ -965,7 +997,8 @@ function dl_package_versions_from_repositories()
 	for (let index, repo in repository_list) {
 		let url = replace(repo, "packages.adb", "index.json");
 		let json = dl_json(url, "/tmp/owut-repositories-packages-"+index+".json", true);
-		repositories_packages = sort({ ...(repositories_packages ?? []), ...(json?.packages ?? []) });
+		let pkg_map = package_versions_from_index(json);
+		repositories_packages = sort({ ...(repositories_packages ?? []), ...(pkg_map ?? []) });
 	}
 
 	if (repositories_mode == "append") {
