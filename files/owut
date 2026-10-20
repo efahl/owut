@@ -106,7 +106,7 @@ const Logger = {
 		// Variant for errors indicating code issue, not a user error.
 		this.err(fmt, ...args);
 		assert(false,
-		   `This is a bug in '${PROG}', please report at\n`
+		   `This is a bug in '${PROG}', please report at\n` +
 		   `  ${issue_url}\n`);
 	},
 };
@@ -179,11 +179,11 @@ let arg_defs = proto([
 arg_defs.set_prog_info(`owut - OpenWrt Upgrade Tool ${VERSION} (${sourcepath()})`);
 arg_defs.set_bookends(
 	"\nowut is an upgrade tool for OpenWrt.\n",
-	`\nFull documentation\n`
-	`  ${wiki_url}\n\n`
-	`Questions and discussion\n`
-	`  ${forum_url}\n\n`
-	`Issues and bug reports\n`
+	`\nFull documentation\n` +
+	`  ${wiki_url}\n\n` +
+	`Questions and discussion\n` +
+	`  ${forum_url}\n\n` +
+	`Issues and bug reports\n` +
 	`  ${issue_url}\n\n`
 );
 
@@ -1789,27 +1789,27 @@ function show_config()
 	let downgrade = build.to.is_downgrade_from(build.from) ? L.colorize(L.RED, " DOWNGRADE") : "";
 	let hash = split(build.to.rev_code, "-")[1];
 	L.log(0,
-		`ASU-Server     ${url.sysupgrade_root}\n`
-		`Upstream       ${url.upstream}\n`
-		`Target         ${device.target}\n`
-		`Profile        ${device.platform} (${device.board})\n`
+		`ASU-Server     ${url.sysupgrade_root}\n` +
+		`Upstream       ${url.upstream}\n` +
+		`Target         ${device.target}\n` +
+		`Profile        ${device.platform} (${device.board})\n` +
 		`Package-arch   ${device.arch}\n`
 	);
 	L.log(1,
-		`Root-FS-type   ${device.fstype}\n`
+		`Root-FS-type   ${device.fstype}\n` +
 		`Image-type     ${device.sutype}\n`
 	);
 	L.log(0,
-		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kernel})\n`
+		`Version-from   ${build.from.version} ${build.from.rev_code} (kernel ${build.from.kernel})\n` +
 		`Version-to     ${build.to.version} ${build.to.rev_code} (kernel ${build.to.kernel})${downgrade}\n`
 	);
 	if (hash)
 	L.log(1, `Build-commit   https://git.openwrt.org/?p=openwrt/openwrt.git;a=shortlog;h=${hash}\n`);
 	L.log(1,
-		`Build-FS-type  ${build.to.fstype}\n`
-		`Build-at       ${build.to.date}\n`
-		`Image-prefix   ${build.to.img_prefix}\n`
-		`Image-URL      ${url.download}\n`
+		`Build-FS-type  ${build.to.fstype}\n` +
+		`Build-at       ${build.to.date}\n` +
+		`Image-prefix   ${build.to.img_prefix}\n` +
+		`Image-URL      ${url.download}\n` +
 		`Image-file     ${build.to.img_file}\n`
 	);
 	L.log(1, "Installed      %3d packages\n", length(packageDB));
@@ -2058,10 +2058,10 @@ function check_init_script()
 		}
 	}
 	else if (fs.access(asu_defaults)) {
-		L.wrn(`You have a custom uci-defaults script at\n`
-			`  ${asu_defaults}\n`
-			`and have not referenced it with the 'init-script' option.\n`
-			`Please read:\n`
+		L.wrn(`You have a custom uci-defaults script at\n` +
+			`  ${asu_defaults}\n` +
+			`and have not referenced it with the 'init-script' option.\n` +
+			`Please read:\n` +
 			`  ${wiki_url}#using_a_uci-defaults_script\n\n`
 		);
 	}
@@ -2192,8 +2192,8 @@ function verify_image()
 	else {
 		let file_sha = sha256.sum(image);
 		let expected = sha256.saved_sum(image);
-		L.err(`sha256 doesn't match:\n`
-		    `    calculated '${file_sha}'\n`
+		L.err(`sha256 doesn't match:\n` +
+		    `    calculated '${file_sha}'\n` +
 		    `    saved      '${expected}'\n`);
 		if (! options.keep) {
 			fs.unlink(image);
