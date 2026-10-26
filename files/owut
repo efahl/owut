@@ -169,6 +169,7 @@ let arg_defs = proto([
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
 	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-[server-dependent]).` },
+	{ name: "image_type",                 long: "--image-type",       action: "store",     nargs: 1, default: null,  help: "Desired image type (usually 'sysupgrade')." },
 	{ name: "image",         short: "-i", long: "--image",            action: "file",      nargs: 1, default: "/tmp/firmware.bin", help: "Image name for download, verify, install and upgrade." },
 	{ name: "format",        short: "-f", long: "--format",           action: "enum",      nargs: 1, default: null, one_of: _list_fmts, help: `Format for 'list' output (${join(", ", _list_fmts)}).` },
 	{ name: "pre_install",   short: "-p", long: "--pre-install",      action: "store",     nargs: 1, default: null,  help: "Script to exec just prior to launching final sysupgrade." },
@@ -1461,10 +1462,11 @@ function collect_device_info()
 		efi_check           = bv[3] || "no";  // Default to no, if unspecified.
 	}
 
-	let target   = sysb.release.target;
-	let platform = replace(sysb.board_name, /,/, "_");
-	let ver_from = sysb.release.version;
-	let sutype   = fix_image_type(target, sysb.image_type, efi_check);
+	let target     = sysb.release.target;
+	let platform   = replace(sysb.board_name, /,/, "_");
+	let ver_from   = sysb.release.version;
+	let image_type = options.image_type || sysb.image_type;
+	let sutype     = fix_image_type(target, image_type, efi_check);
 
 	device = {
 		arch:     null,              // "x86_64" or "mipsel_24kc"   or "aarch64_cortex-a53", contained in platform_json
