@@ -131,6 +131,7 @@ let commands = {
 let _fstypes   = ["squashfs", "ext4", "ubifs", "jffs2"];
 let _fslo      = 1;  // See https://sysupgrade.openwrt.org/redoc#operation/api_v1_build_post_api_v1_build_post
 let _list_fmts = ["fs-user", "fs-all", "config"];
+let _rep_modes = ["append", "replace", "disable"];
 
 function parse_rev_code(version_code)
 {
@@ -164,6 +165,7 @@ let arg_defs = proto([
 	{ name: "clean_slate",                long: "--clean-slate",      action: "set",                 default: false, help: "Remove all but default packages (READ THE DOCS)." },
 	{ name: "ignored_defaults",           long: "--ignored-defaults", action: "storex",    nargs: 1,                 help: "List of explicitly ignored default package names." },
 	{ name: "ignored_changes",            long: "--ignored-changes",  action: "storex",    nargs: 1,                 help: "List of explicitly ignored package changes." },
+	{ name: "repositories_mode",          long: "--repositories-mode",action: "enum",      nargs: 1, default: "append", one_of: _rep_modes, help:"Specify handling of external package feeds." },
 	{ name: "init_script",   short: "-I", long: "--init-script",      action: "store",     nargs: 1, default: null,  help: "Path to uci-defaults script to run on first boot ('-' use stdin)." },
 	{ name: "fstype",        short: "-F", long: "--fstype",           action: "enum",      nargs: 1, default: null, one_of: _fstypes, help: `Desired root file system type (${join(", ", _fstypes)}).` },
 	{ name: "rootfs_size",   short: "-S", long: "--rootfs-size",      action: "store_int", nargs: 1, default: null, lower: _fslo, help: `DANGER: See wiki before using!  Root file system size in MB (${_fslo}-[server-dependent]).` },
@@ -241,63 +243,6 @@ let packages = {  // Dictionary of package lists.
 	// Logging of modifications
 	replaced:  {}, // Log of replacements and removals due to 'package_changes'.
 };
-
-//------------------------------------------------------------------------------
-// Repositories
-
-const repositories_mode = uci.get('attendedsysupgrade', 'owut', 'repositories_mode') || "append";
-const repository_aliases = uci.get('attendedsysupgrade', 'owut', 'repository_aliases') || [];
-
-let repositories = {};
-let repository_keys = [];
-
-const repository_dir = "/etc/apk/repositories.d";
-const repository_keys_dir = "/etc/apk/keys";
-let repository_files = fs.lsdir(repository_dir);
-const repository_key_files = fs.lsdir(repository_keys_dir);
-let repository_list = [];
-
-if (repository_files) {
-	if (repositories_mode == "append") {
-		repository_files = filter(repository_files, (i) => i != "distfeeds.list");
-	}
-
-	for (let file in repository_files) {
-		let file_path = repository_dir + '/' + file;
-
-		let stat = fs.stat(file_path);
-		if (stat && stat.type === 'file') {
-			let content = fs.readfile(file_path);
-			if (content) {
-				let lines = split(content, "\n");
-				for (let line in lines) {
-					let valid = match(trim(line), /^http/);
-					if (valid) {
-						push(repository_list, line);
-					}
-				}
-			}
-		}
-	}
-}
-
-let use_repositories = length(repository_list) != 0;
-
-if (use_repositories) {
-	if (repository_key_files) {
-		for (let file in repository_key_files) {
-			let file_path = repository_keys_dir + '/' + file;
-
-			let stat = fs.stat(file_path);
-			if (stat && stat.type === 'file') {
-				let content = fs.readfile(file_path);
-				if (content) {
-					push(repository_keys, content)
-				}
-			}
-		}
-	}
-}
 
 //------------------------------------------------------------------------------
 
@@ -916,64 +861,125 @@ function branch_of(version)
 	return m ? m[0] : "";
 }
 
-function generate_repositories() {
-	for (let index, repo in repository_list) {
-		let version_from_rx = regexp(build.from.version);
-		let branch_from_rx = regexp(branch_of(build.from.version));
+//------------------------------------------------------------------------------
+// External feeds
 
-		if (repositories_mode == "replace") {
-			if (build.to.version == "SNAPSHOT") {
-				repo = replace(repo, regexp("/releases/.[^/]*/"), "/snapshots/");
-			} 
+const Feeds = {
+	repository_dir:      "/etc/apk/repositories.d",
+	repository_keys_dir: "/etc/apk/keys",
 
-			const kmods_path = `${build.to.kernel}-${build.to.kernel_release}-${build.to.kernel_vermagic}`;
-			repo = replace(repo, regexp("/kmods/.[^/]*/"), "/kmods/"+kmods_path+"/");
-			L.log(4, "Adjust kernel modules url': %s\n", repo);			
+	paths:   [],
+	mode:    null,
+	enabled: null,
+
+	init: function(mode) {
+		this.mode    = mode;
+		this.enabled = mode != "disable";
+
+		if (this.enabled) {
+			let repository_files = fs.lsdir(this.repository_dir);
+			if (this.mode == "append") {
+				repository_files = filter(repository_files, (i) => i != "distfeeds.list");
+			}
+
+			for (let file in repository_files) {
+				let file_path = `${this.repository_dir}/${file}`;
+
+				let stat = fs.stat(file_path);
+				if (stat?.type === "file") {
+					let content = fs.readfile(file_path);
+					if (content) {
+						let lines = split(content, "\n");
+						for (let line in lines) {
+							let valid = match(trim(line), /^http/);
+							if (valid) {
+								push(this.paths, line);
+							}
+						}
+					}
+				}
+			}
+			this.enabled = length(this.paths) != 0;
+		}
+	},
+
+	_adjust_paths: function () {
+		for (let index, repo in this.paths) {
+			let version_from_rx = regexp(build.from.version);
+			let branch_from_rx = regexp(branch_of(build.from.version));
+
+			if (this.mode == "replace") {
+				if (build.to.version == "SNAPSHOT") {
+					repo = replace(repo, regexp("/releases/.[^/]*/"), "/snapshots/");
+				}
+
+				const kmods_path = `${build.to.kernel}-${build.to.kernel_release}-${build.to.kernel_vermagic}`;
+				repo = replace(repo, regexp("/kmods/.[^/]*/"), `/kmods/${kmods_path}/`);
+				L.log(3, "Adjust kernel modules url': %s\n", repo);
+			}
+
+			// The repository contains a reference of the from version
+			if (match(repo, version_from_rx)) {
+				repo = replace(repo, build.from.version, build.to.version);
+				L.log(3, "Repository match 'version_from', replaced with 'version_to': %s\n", repo);
+
+			// The repository contains a reference of the from branch
+			} else if (match(repo, branch_from_rx)) {
+				repo = replace(repo, branch_of(build.from.version), branch_of(build.to.version));
+				L.log(3, "Repository match 'branch_from', replaced with 'branch_to': %s\n", repo);
+			}
+
+			const repository_aliases = uci.get("attendedsysupgrade", "owut", "repository_aliases");
+			for (let alias in repository_aliases) {
+				let pattern = split(alias, " ")[0];
+				let replacement = split(alias, " ")[1];
+				let pattern_rx = regexp(pattern);
+
+				if (match(repo, pattern_rx)) {
+					repo = replace(repo, pattern_rx, replacement)
+				}
+			}
+
+			this.paths[index] = repo;
+		}
+	},
+
+	dl_package_versions: function() {
+		if (! this.enabled) {
+			return dl_package_versions();
 		}
 
-		// The repository contains a reference of the from version
-		if (match(repo, version_from_rx)) {
-			repo = replace(repo, build.from.version, build.to.version);
-			L.log(4, "Repository match 'version_from', replaced with 'version_to': %s\n", repo);
+		let packages = this.mode == "append" ? dl_package_versions() : {};
 
-		// The repository contains a reference of the from branch
-		} else if (match(repo, branch_from_rx)) {
-			repo = replace(repo, branch_of(build.from.version), branch_of(build.to.version));
-			L.log(4, "Repository match 'branch_from', replaced with 'branch_to': %s\n", repo);
+		this._adjust_paths();
+		for (let index, repo in this.paths) {
+			let url  = replace(repo, "packages.adb", "index.json");
+			let json = dl_json(url, `/tmp/owut-repositories-packages-${index}.json`, true);
+			packages = sort({ ...(packages ?? []), ...(json?.packages ?? []) });
 		}
+		return sort({...(packages ?? []) });
+	},
 
-		for (let alias in repository_aliases) {
-			let pattern = split(alias, " ")[0];
-			let replacement = split(alias, " ")[1];
-			let pattern_rx = regexp(pattern);
+	repositories: function() {
+		// Formatted as a dict per ASU API requirements, key should be
+		// "feed-name", but we don't have that in the distfeeds now.
+		return { ...this.paths };
+	},
 
-			if (match(repo, pattern_rx)) {
-				repo = replace(repo, pattern_rx, replacement)
+	keys: function() {
+		let keys = [];
+		for (let file in fs.lsdir(this.repository_keys_dir)) {
+			let path = `${this.repository_keys_dir}/${file}`;
+			if (fs.stat(path)?.type === "file") {
+				let content = fs.readfile(path);
+				if (content) {
+					push(keys, content)
+				}
 			}
 		}
-
-		repositories[index] = repo;
-		repository_list[index] = repo;
-	}
-}
-
-function dl_package_versions_from_repositories()
-{
-	let repositories_packages = {};
-	generate_repositories();
-
-	for (let index, repo in repository_list) {
-		let url = replace(repo, "packages.adb", "index.json");
-		let json = dl_json(url, "/tmp/owut-repositories-packages-"+index+".json", true);
-		repositories_packages = sort({ ...(repositories_packages ?? []), ...(json?.packages ?? []) });
-	}
-
-	if (repositories_mode == "append") {
-		return sort({ ...dl_package_versions(), ...(repositories_packages ?? []) });
-	} else if (repositories_mode == "replace") {
-		return sort({...(repositories_packages ?? []) });
-	}
-}
+		return keys;
+	},
+};
 
 //------------------------------------------------------------------------------
 //-- Package management --------------------------------------------------------
@@ -1296,12 +1302,7 @@ function collect_packages()
 
 	packages.installed = installed.packages;
 	packages.top_level = sort(keys(top_level.packages));
-
-	if (use_repositories) {
-		packages.available = dl_package_versions_from_repositories() ?? {};
-	} else {
-		packages.available = dl_package_versions() ?? {};  // Might be null in ancient versions.
-	}
+	packages.available = Feeds.dl_package_versions() ?? {}; // Might be null in ancient versions.
 
 	for (let pkg, ver in packages.installed) {
 		packageDB[pkg] = {
@@ -2135,10 +2136,10 @@ function blob(report)
 		L.log(log_level, "  Included init script '%s' (%d bytes) in build request\n", options.init_script, length(init_script));
 	}
 
-	if (use_repositories) {
-		blob.repositories_mode = repositories_mode;
-		blob.repositories = repositories;
-		blob.repository_keys = repository_keys;
+	if (Feeds.enabled) {
+		blob.repositories_mode = Feeds.mode;
+		blob.repositories      = Feeds.repositories();
+		blob.repository_keys   = Feeds.keys();
 	}
 
 	return blob;
@@ -2443,6 +2444,7 @@ uloop.init();
 ubus.init();
 
 initialize_urls();
+Feeds.init(options.repositories_mode);
 
 let updates, counts, details;
 let exit_status = EXIT_ERR;   // Assume failure, until we know otherwise.

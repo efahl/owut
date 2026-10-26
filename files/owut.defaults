@@ -22,7 +22,7 @@ config owut 'owut'
 #	option rootfs_size         256
 #	option pre_install        '/etc/owut.d/pre-install.sh'
 #	option poll_interval       10000  # In milliseconds
-#	option repositories_mode  'append'
+#	option repositories_mode  'append'  # or 'replace' or 'disable'
 #	list   repository_aliases 'SNAPSHOT main'
 #	list   ignored_defaults   'kmod-drm-i915'
 #	list   ignored_defaults   'kmod-dwmac-intel'
