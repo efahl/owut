@@ -2463,6 +2463,10 @@ function terminate()
 
 signal("SIGINT", terminate);  // Ensure ctrl-C works when inside build loop.
 
+if (int(ubus.run("id", "-u").stdout) != 0) {
+	L.die("You are not logged in as root.\n");
+}
+
 switch (options.command) {
 	case "versions":
 		collect_overview();
