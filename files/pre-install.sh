@@ -72,4 +72,35 @@ if false; then
 fi
 
 
+# Example 4 - check that the config backup will fit
+# On some targets (e.g. x86), sysupgrade copies the config backup onto the
+# boot partition after the new image is written, without checking that it
+# fits.  A backup that is too big is silently truncated, and only part of it
+# is restored after the reboot (see openwrt/openwrt#26370).  This check stops
+# the upgrade before anything is installed if the backup would not fit in the
+# free space on /boot.  The margin allows for a larger kernel in the new image.
+if false; then
+	margin_kb=2048
+	backup="/tmp/backup-size-check.tgz"
+
+	if ! grep -q ' /boot ' /proc/mounts; then
+		echo "Backup size check skipped: /boot is not mounted"
+	else
+		sysupgrade --create-backup "$backup" > /dev/null || { rm -f "$backup"; exit 1; }
+		backup_kb=$(( ($(wc -c < "$backup") + 1023) / 1024 ))
+		rm -f "$backup"
+
+		free_kb=$(df -Pk /boot | awk 'NR==2 {print $4}')
+		limit_kb=$(( free_kb - margin_kb ))
+		if [ "$backup_kb" -gt "$limit_kb" ]; then
+			echo "Backup is ${backup_kb} KB, but only ${limit_kb} KB will fit on /boot"
+			echo "(${free_kb} KB free - ${margin_kb} KB margin)."
+			echo "Remove large files from the backup (see /etc/sysupgrade.conf) and try again."
+			exit 1
+		fi
+		echo "Backup size OK: ${backup_kb} KB, limit ${limit_kb} KB"
+	fi
+fi
+
+
 exit 0
