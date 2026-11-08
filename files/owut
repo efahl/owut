@@ -716,81 +716,25 @@ function ck_int(s)
 	return n == s ? n : null;
 }
 
-const standard = regexp("^([0-9.]+)(~([0-9a-f]+)){0,1}(-r([0-9]+)){0,1}$", "i");
-const pre_bits = regexp("^[-a-z.]+",          "i");
-const ver_bits = regexp("^[0-9.]+",           "i");
-const ver_splt = regexp("[^a-z0-9]",          "i");
-const rev_bits = regexp("-[r]{0,1}([0-9]+)$", "i");
-const apk_bits = regexp("^_[a-z]+([0-9]+)$",  "i");
+const apk_vers = /^([0-9.]+)([a-z])?(_[a-z]+([0-9]*)){0,1}(~([0-9a-f]+)){0,1}(-r([0-9]+)){0,1}/i;
 
 function version_parse(version)
 {
-	// Two forms are parsed incorrectly:
-	//   1) Those with all dashes '-', no hash and no rev.  The final number
-	//      is interpreted as the rev number:
-	//        ct-bugcheck: 2016-07-21
-	//        ver=[2016, 7], hsh=null, rev=21
-	//   2) Those starting with a hash, and the initial digits are decimal:
-	//        open-plc-utils: 1ba7d5a0-6
-	//        ver=[1], hsh="ba7d5a0", rev=6
-	//
-	// #1 is only aesthetic and ends up working fine; #2 was fixed in
-	// the apk version cleanup and only appears in 23.05 and earlier.
+	let ver = [], hsh, rev;
 
-	let ver, hsh, rev, extra;
-
-	let parts = match(version, standard);
+	let parts = match(version, apk_vers);
 	if (parts) {
-		// Standard n.n.n~h-rn sequences with optional hash and rev.
-		ver = map(split(parts[1], ver_splt), to_int);
-		hsh = parts[3];
-		rev = ck_int(parts[5]);
-	}
-	else {
-		// Some odd ones:
-		// luasoap: 2014-08-21-raf1e100281cee4b972df10121e37e51d53367a98
-		// luci-app-advanced-reboot: 1.0.1-11-1
+		// The trim is only needed for 23.05 packages.
+		ver = map(split(trim(parts[1], "."), "."), to_int);
+		hsh = parts[6];
+		rev = ck_int(parts[8]);
 
-		if (parts = match(version, pre_bits)) {
-			// adb:                android.5.0.2_r1-r3
-			// libinih:            r58-r1
-			// luci-app-dockerman: v0.5.13-20240317-1
-			// luci-mod-status:    git-24.141.29354-5cfe7a7 (23.05)
-			version = substr(version, length(parts[0]));
+		if (parts[2] && ! hsh) {
+			hsh = parts[2];
 		}
-
-		if (rev = match(version, rev_bits)) {
-			// Extract and strip rev number from version, in case
-			// it's one of those with lots of dashes.
-			version = substr(version, 0, -length(rev[0]));
-			rev     = to_int(rev[1]);
+		if (parts[3]) {
+			push(ver, parts[4] ? to_int(parts[4]) : 0);
 		}
-
-		if (ver = match(version, ver_bits)) {
-			version = substr(version, length(ver[0]));
-			ver     = map(split(rtrim(ver[0], "."), ver_splt), to_int);
-		}
-
-		if (length(ver) == 1 && index(version, "-") == 0) {
-			// pservice: 2017-08-29-r3
-			for (let ns in split(substr(version, 1), /[-.]/)) {
-				let n = ck_int(ns);
-				if (n == null) break;
-				push(ver, n);
-				version = substr(version, length(ns)+1);
-			}
-		}
-
-		if (extra = match(version, apk_bits)) {
-			// For apk underscore-named versions:
-			// openssh-ftp-server 9.9_p1-r3 9.9_p2-r1
-			push(ver, int(extra[1]));
-			version = null;
-		}
-
-		// Anything left over must be the "hash" (if we can call it that).
-		hsh = version || null;
-		if (index(hsh, "-") == 0) hsh = substr(hsh, 1);
 	}
 
 	return { ver, hsh, rev };
