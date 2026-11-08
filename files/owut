@@ -2255,7 +2255,7 @@ function download()
 				L.log(1, "  kernel_version = %s\n", build.to.kernel);
 				L.log(1, "  rootfs_size_mb = %s\n", response.request.rootfs_size_mb ?? "default");
 				L.log(1, "  init-script    = %s\n", response.request.defaults ? options.init_script : "no-init-script");
-				L.log(3, "  images = %.2J\n",       response.images);
+				L.log(3, "  images = %.2J\n",       sort(response.images));
 				L.log(3, "  build_cmd = %.2J\n",    response.build_cmd);
 				L.log(3, "  manifest = %.2J\n",     response.manifest);
 				L.log(1, "\n");
