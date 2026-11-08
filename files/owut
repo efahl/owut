@@ -1027,15 +1027,7 @@ function what_provides(pkg)
 	// Attempt to find the package provider, if it exists.  This is a
 	// hacky workaround for https://github.com/efahl/owut/issues/10, see
 	// that issue for current progress towards a proper solution.
-	let result;
-
-	result = ubus.raw_run("opkg", "whatprovides", pkg);
-	if (result) {
-		let m = match(trim(result.stdout), /What provides.*\n *(.*)/);
-		if (m) return m[-1];
-	}
-
-	result = ubus.raw_run("apk", "query", "--installed", "--format", "json", "--match", "provides", pkg);
+	let result = ubus.raw_run("apk", "query", "--installed", "--format", "json", "--match", "provides", pkg);
 	if (result) {
 		let j = json(result.stdout);
 		return length(j) == 1 ? j[0].name : null;
