@@ -894,15 +894,25 @@ const Feeds = {
 			return dl_package_versions();
 		}
 
-		let packages = this.mode == "append" ? dl_package_versions() : {};
+		let packages = (this.mode == "append" ? dl_package_versions() : null) ?? {};
 
 		this._adjust_paths();
 		for (let index, repo in this.paths) {
 			let url  = replace(repo, "packages.adb", "index.json");
 			let json = dl_json(url, `/tmp/owut-repositories-packages-${index}.json`, true);
-			packages = sort({ ...(packages ?? []), ...(json?.packages ?? []) });
+
+			// Keep the newest version across feeds, as apk does.
+			for (let pkg, ver in json?.packages ?? {}) {
+				let cur = packages[pkg];
+				if (pkg_ver_cmp(cur, ver) < 0) {
+					packages[pkg] = ver;
+				}
+				else if (cur != ver) {
+					L.log(2, "Ignoring %s %s from %s, keeping newer %s\n", pkg, ver, url, cur);
+				}
+			}
 		}
-		return sort({...(packages ?? []) });
+		return sort(packages);
 	},
 
 	repositories: function() {
